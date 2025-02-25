@@ -1,0 +1,39 @@
+<component name="InspectionProjectProfileManager">
+  <profile version="1.0">
+    <option name="myName" value="Project Default" />
+    <inspection_tool class="PyInterpreterInspection" enabled="false" level="WARNING" enabled_by_default="false" />
+    <inspection_tool class="PyPep8Inspection" enabled="true" level="WEAK WARNING" enabled_by_default="true">
+      <option name="ignoredErrors">
+        <list>
+          <option value="E402" />
+          <option value="E501" />
+        </list>
+      </option>
+    </inspection_tool>
+    <inspection_tool class="PyPep8NamingInspection" enabled="true" level="WEAK WARNING" enabled_by_default="true">
+      <option name="ignoredErrors">
+        <list>
+          <option value="N806" />
+        </list>
+      </option>
+    </inspection_tool>
+    <inspection_tool class="PyUnresolvedReferencesInspection" enabled="true" level="WARNING" enabled_by_default="true">
+      <option name="ignoredIdentifiers">
+        <list>
+          <option value="main.train_dataset" />
+          <option value="main.test_dataset" />
+          <option value="main.num_labels" />
+          <option value="main.langchain_openai" />
+          <option value="pywebview" />
+          <option value="turtle.showturtle.session_state" />
+          <option value="turtle.showturtle.chat_message" />
+          <option value="turtle.showturtle.markdown" />
+          <option value="main1.langchain_openai" />
+          <option value="main.*" />
+          <option value="streamlit" />
+          <option value="google.*" />
+        </list>
+      </option>
+    </inspection_tool>
+  </profile>
+</component>
