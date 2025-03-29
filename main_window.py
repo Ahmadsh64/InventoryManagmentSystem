@@ -44,7 +44,7 @@ def open_main_window(user_type):
     create_sidebar_button("Exit", lambda: return_to_login(main_window))
 
     main_window.mainloop()
-
+    
 
 def return_to_login(current_window):
     from login import create_login_window
