@@ -1,6 +1,8 @@
 import tkinter as tk
 from tkinter import ttk
-from inventory import view_inventory, open_add_item_window , open_search_item_window, open_update_item_window, open_report_window, open_delete_item_window, open_purchase_window
+from tkinter import Label
+from inventory import (view_inventory, open_add_item_window , open_search_item_window,
+                       open_update_item_window, open_report_window, open_delete_item_window, open_purchase_window, open_alerts_window)
 
 
 # פתיחת חלון ראשי
@@ -11,14 +13,17 @@ def open_main_window(user_type):
     main_window.geometry("800x600")
     main_window.config(bg="#34495e")
 
-    title_label = ttk.Label(main_window, text=f"התחברות - {user_type}", font=("Arial", 18, "bold"), background="#34495e", foreground="#2c3e50")
-    title_label.pack(pady=10)
+    title_label = ttk.Label(main_window, text=f"התחברות - {user_type}", font=("Arial", 18, "bold"), background="#34495e", foreground="#f4f4f4")
+    title_label.pack(pady=15)
 
     tree_frame = tk.Frame(main_window, bg="#f4f4f4")
     tree_frame.pack(side="right", fill="both", expand=True)
 
     sidebar = tk.Frame(main_window, width=200, bg="#2d3436", height=600, relief="sunken")
     sidebar.pack(side="left", fill="y")
+
+    alerts_label = Label(main_window, text="", font=("Arial", 12, "bold"))
+    alerts_label.place(relx=0.95, rely=0.02, anchor="ne")
 
     def create_sidebar_button(text, command):
         button = tk.Button(sidebar, text=text, bg="#34495e", fg="White", font=("Arial", 14), command=command)
@@ -32,6 +37,8 @@ def open_main_window(user_type):
         create_sidebar_button("Search Item",lambda: open_search_item_window(tree_frame))
         create_sidebar_button("View Inventory",lambda: view_inventory(tree_frame))
         create_sidebar_button("Generating Reports",lambda: open_report_window(tree_frame))
+        create_sidebar_button("Notifications", lambda :open_alerts_window(tree_frame, alerts_label, main_window))
+
     elif user_type == "worker":
         create_sidebar_button("View Inventory",lambda: view_inventory(tree_frame))
         create_sidebar_button("Update Item",lambda: open_update_item_window(tree_frame))
@@ -44,7 +51,7 @@ def open_main_window(user_type):
     create_sidebar_button("Exit", lambda: return_to_login(main_window))
 
     main_window.mainloop()
-    
+
 
 def return_to_login(current_window):
     from login import create_login_window
