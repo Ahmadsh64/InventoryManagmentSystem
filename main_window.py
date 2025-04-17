@@ -2,7 +2,7 @@ import tkinter as tk
 from tkinter import ttk
 from tkinter import Label
 from inventory import (view_inventory, open_add_item_window , open_search_item_window,
-                       open_update_item_window, open_report_window, open_delete_item_window, open_purchase_window, open_alerts_window)
+                       open_update_item_window, open_report_window, open_delete_item_window, open_purchase_window, open_alerts_window, open_finance_window)
 
 
 # פתיחת חלון ראשי
@@ -25,6 +25,8 @@ def open_main_window(user_type):
     alerts_label = Label(main_window, text="", font=("Arial", 12, "bold"))
     alerts_label.place(relx=0.95, rely=0.02, anchor="ne")
 
+
+
     def create_sidebar_button(text, command):
         button = tk.Button(sidebar, text=text, bg="#34495e", fg="White", font=("Arial", 14), command=command)
         button.pack(fill="x", padx=10, pady=10)
@@ -38,6 +40,8 @@ def open_main_window(user_type):
         create_sidebar_button("View Inventory",lambda: view_inventory(tree_frame))
         create_sidebar_button("Generating Reports",lambda: open_report_window(tree_frame))
         create_sidebar_button("Notifications", lambda :open_alerts_window(tree_frame, alerts_label, main_window))
+        create_sidebar_button("Finance",lambda: open_finance_window(tree_frame))
+
 
     elif user_type == "worker":
         create_sidebar_button("View Inventory",lambda: view_inventory(tree_frame))

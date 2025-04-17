@@ -136,6 +136,24 @@ def open_add_item_window(tree_frame):
             connection.commit()
 
             messagebox.showinfo("הצלחה", "הפריט נוסף בהצלחה")
+
+            popup = tk.Toplevel()
+            popup.title("תעודת קבלת סחורה")
+            msg = f"""
+                   תעודת קבלה
+                  ------------------------
+                  {name}פריט :
+                  {SKU}:SKU
+                 כמות: {quantity}
+                  מחיר ליחידה: ₪{price}
+                סניף: {branch}
+                תאריך: {datetime.now().strftime('%Y-%m-%d %H:%M')}
+                  """
+            tk.Label(popup, text=msg, font=("Arial", 12), justify="right").pack(padx=50, pady=50)
+
+        except mysql.connector.Error as e:
+            messagebox.showerror("שגיאה", f"שגיאה בהנפקת תעודה: {e}")
+
             clear_inputs()
 
         except mysql.connector.Error as e:
@@ -201,6 +219,7 @@ def open_update_item_window(tree_frame):
         name = entry_name.get()
         category = entry_category.get()
         quantity = entry_quantity.get()
+        add_quantity = entry_add_quantity.get()
         price = entry_price.get()
         branch = entry_branch.get()
         sku = entry_sku.get()
@@ -218,19 +237,52 @@ def open_update_item_window(tree_frame):
             connection = connect_to_database()
             cursor = connection.cursor()
 
-            # עדכון פריט כולל השדות החדשים
+            # אם הוזנה כמות להוספה
+            add_qty = int(add_quantity) if add_quantity and add_quantity.isdigit() else 0
+            new_quantity = int(quantity) + add_qty
+
+            # עדכון הפריט עם כמות חדשה
             cursor.execute(
                 """UPDATE inventory SET item_name=%s, category=%s, quantity=%s, price=%s, branch_id=%s, 
-                           color=%s, size=%s, shelf_row=%s, shelf_column=%s, image_path=%s WHERE SKU=%s""",
-                (name, category, int(quantity), float(price), branch, color, size, shelf_row, shelf_column, image_path,
+                   color=%s, size=%s, shelf_row=%s, shelf_column=%s, image_path=%s WHERE SKU=%s""",
+                (name, category, new_quantity, float(price), branch, color, size, shelf_row, shelf_column, image_path,
                  sku)
             )
+
+            # רישום הוצאה רק אם נוספה כמות
+            if add_qty > 0:
+                total_cost = add_qty * float(price)
+                cursor.execute("""
+                        INSERT INTO expenses (branch_id, sku, item_name, quantity_added, unit_price, total_cost)
+                        VALUES (%s, %s, %s, %s, %s, %s)
+                    """, (branch, sku, name, add_qty, float(price), total_cost))
+
             connection.commit()
+
             if cursor.rowcount == 0:
                 messagebox.showerror("שגיאה", "לא נמצא פריט עם ה-SKU שסיפקת")
             else:
                 messagebox.showinfo("הצלחה", "הפריט עודכן בהצלחה")
-                clear_inputs()
+
+                popup = tk.Toplevel()
+                popup.title("תעודת קבלת סחורה")
+                msg = f"""
+                                    תעודת קבלה
+                                    ------------------------
+                                     {name}פריט:
+                                     SKU: {sku}
+                                    כמות: {add_qty}
+                                    מחיר ליחידה: ₪{price}
+                                    סך הכול: ₪{total_cost}
+                                    סניף: {branch}
+                                    תאריך: {datetime.now().strftime('%Y-%m-%d %H:%M')}
+                                    """
+                tk.Label(popup, text=msg, font=("Arial", 12), justify="right").pack(padx=50, pady=50)
+
+        except mysql.connector.Error as e:
+            messagebox.showerror("שגיאה", f"שגיאה בהנפקת תעודה: {e}")
+
+            clear_inputs()
         except mysql.connector.Error as e:
             messagebox.showerror("שגיאה", f"שגיאה בעת עדכון הפריט: {e}")
         finally:
@@ -326,6 +378,11 @@ def open_update_item_window(tree_frame):
         ttk.Label(update_item_frame, text=label[0]).grid(row=i + 1, column=0, padx=5, pady=5, sticky="e")
         entry.grid(row=i + 1, column=1, padx=5, pady=5, sticky="w")
 
+    # שדה חדש: כמות להוספה
+    ttk.Label(update_item_frame, text="כמות להוספה:").grid(row=3, column=2, padx=5, pady=5, sticky="e")
+    entry_add_quantity = ttk.Entry(update_item_frame)
+    entry_add_quantity.grid(row=3, column=3, padx=5, pady=5, sticky="w")
+
     # שדה בחירת תמונה
     image_path_var = tk.StringVar()
     ttk.Label(update_item_frame, text="נתיב תמונה:").grid(row=len(fields) + 1, column=0, padx=5, pady=5, sticky="e")
@@ -346,38 +403,127 @@ def open_delete_item_window(tree_frame):
     for widget in tree_frame.winfo_children():
         widget.destroy()
 
-    def delete_item():
-        sku = entry_sku.get()
-
+    def update_item_visibility():
+        sku = entry_sku.get().strip()
         if not sku:
-            messagebox.showerror("שגיאה", "אנא הזן את ה-SKU של הפריט שברצונך למחוק")
+            messagebox.showerror("שגיאה", "אנא הזן את ה-SKU של הפריט שברצונך לעדכן")
             return
+
         try:
             connection = connect_to_database()
             cursor = connection.cursor()
 
-            cursor.execute("DELETE FROM inventory WHERE SKU = %s", (sku,))
+            cursor.execute("UPDATE inventory SET is_active = FALSE WHERE sku = %s", (sku,))
             connection.commit()
 
             if cursor.rowcount == 0:
                 messagebox.showerror("שגיאה", "לא נמצא פריט עם ה-SKU שסיפקת")
             else:
-                messagebox.showinfo("הצלחה", "הפריט נמחק בהצלחה")
+                messagebox.showinfo("הצלחה", "הפריט סומן כלא זמין")
+                refresh_items_table()
 
         except mysql.connector.Error as e:
-            messagebox.showerror("שגיאה", f"שגיאה בעת מחיקת הפריט: {e}")
+            messagebox.showerror("שגיאה", f"שגיאה בעדכון הפריט: {e}")
         finally:
             if connection:
                 connection.close()
 
-    delete_item_frame = ttk.LabelFrame(tree_frame, text="מחק פריט לפיSKU")
-    delete_item_frame.pack(padx=90, pady=80,fill="both", expand=True)
+    def refresh_items_table():
+        for row in items_tree.get_children():
+            items_tree.delete(row)
 
-    ttk.Label(delete_item_frame, text="הזן את ה SKU:")
-    entry_sku = ttk.Entry(delete_item_frame)
-    entry_sku.grid(row=0, column=1, padx=5, pady=5, sticky="w")
+        #עדכון סטטוס אוטומטי לפי כמות
+        try:
+            connection = connect_to_database()
+            curses = connection.cursor()
+            curses.execute("UPDATE inventory SET is_active = FALSE WHERE quantity = 0 AND is_active = TRUE")
+            curses.execute("UPDATE inventory SET is_active = TRUE WHERE quantity > 0 AND is_active = FALSE")
+        except mysql.connector.Error as e:
+            messagebox.showerror("שגיאה", f"שגיאה בעדכון סטטוס פריטים: {e}")
+        finally:
+            if connection:
+                connection.close()
 
-    ttk.Button(delete_item_frame, text="מחק פריט", command=delete_item).grid(row=1, columnspan=2, pady=10)
+        try:
+            connection = connect_to_database()
+            cursor = connection.cursor()
+
+            # שליפת הפריטים
+            query = "SELECT sku, item_name, quantity, is_active FROM inventory"
+            if not show_hidden_var.get():
+                query += " WHERE is_active = TRUE"
+
+            cursor.execute(query)
+            rows = cursor.fetchall()
+
+            for row in rows:
+                sku, name, qty, active = row
+                status = "זמין" if active else "לא-זמין"
+                tag = "active" if active else "inactive"
+                items_tree.insert("", "end", values=(sku, name, qty, status), tags=(tag,))
+
+        except mysql.connector.Error as e:
+            messagebox.showerror("שגיאה", f"שגיאה בשליפת פריטים: {e}")
+        finally:
+            if connection:
+                connection.close()
+
+    def restore_selected_item():
+        selected_item = items_tree.focus()
+        if not selected_item:
+            messagebox.showwarning("שים לב", "אנא בחר פריט מתוך הרשימה")
+            return
+
+        sku = items_tree.item(selected_item)['values'][0]
+        try:
+            connection = connect_to_database()
+            cursor = connection.cursor()
+            cursor.execute("UPDATE inventory SET is_active = TRUE WHERE sku = %s", (sku,))
+            connection.commit()
+            messagebox.showinfo("הצלחה", "הפריט הוחזר לרשימת המלאי הפעילה")
+            refresh_items_table()
+
+        except mysql.connector.Error as e:
+            messagebox.showerror("שגיאה", f"שגיאה בהחזרת פריט: {e}")
+        finally:
+            if connection:
+                connection.close()
+
+    # ---------------- תצוגת ממשק ---------------- #
+    delete_item_frame = ttk.LabelFrame(tree_frame, text="ניהול זמינות פריטים")
+    delete_item_frame.pack(padx=40, pady=40, fill="both", expand=True)
+
+    input_frame = ttk.Frame(delete_item_frame)
+    input_frame.pack(pady=10)
+
+    ttk.Label(input_frame, text="הזן SKU:").grid(row=0, column=0, padx=5, pady=5)
+    entry_sku = ttk.Entry(input_frame, width=30)
+    entry_sku.grid(row=0, column=1, padx=5, pady=5)
+    ttk.Button(input_frame, text="הסתר פריט", command=update_item_visibility).grid(row=0, column=2, padx=10)
+
+    # תיבת סימון
+    show_hidden_var = tk.BooleanVar()
+    show_hidden_checkbox = ttk.Checkbutton(delete_item_frame, text="הצג גם פריטים מוסתרים",
+                                           variable=show_hidden_var, command=refresh_items_table)
+    show_hidden_checkbox.pack(pady=5)
+
+    # טבלה
+    columns = ("SKU", "שם פריט", "כמות", "סטטוס")
+    items_tree = ttk.Treeview(delete_item_frame, columns=columns, show="headings", height=12)
+    for col in columns:
+        items_tree.heading(col, text=col)
+        items_tree.column(col, anchor="center", width=100)
+
+    items_tree.pack(padx=10, pady=10, fill="both", expand=True)
+
+    # הגדרת צבעים
+    items_tree.tag_configure("active", background="#e6ffe6")     # ירוק בהיר
+    items_tree.tag_configure("inactive", background="#ffe6e6")   # אדום בהיר
+
+    # כפתור להחזרת פריט
+    ttk.Button(delete_item_frame, text="החזר פריט פעיל", command=restore_selected_item).pack(pady=10)
+
+    refresh_items_table()
 
 
 def open_search_item_window(tree_frame):
@@ -567,11 +713,31 @@ def open_purchase_window(tree_frame):
         image_label.config(image="")
         image_label.image = None
 
+    def remove_selected_item_from_cart():
+        selected_index = cart_listbox.curselection()
+        if not selected_index:
+            messagebox.showwarning("שים לב", "לא נבחר פריט להסרה")
+            return
+
+        index = selected_index[0]
+        item = cart[index]
+
+        # עדכון סכום כולל
+        item_total = item["price"] * item["quantity"]
+        total_amount.set(total_amount.get() - float(item_total))
+
+        # הסרה מהעגלה
+        cart_listbox.delete(index)
+        cart.pop(index)
+        update_cart_display()
+
+
     def update_cart_display():
         cart_listbox.delete(0, tk.END)
         for item in cart:
             cart_listbox.insert(tk.END, f"{item['item_name']} × {item['quantity']} — ₪{item['total_price']:.2f}")
         total_label.config(text=f"סה\"כ לתשלום: ₪{total_amount.get():.2f}")
+
 
     def complete_purchase():
         customer_id = entry_customer_id.get().strip()
@@ -685,6 +851,9 @@ def open_purchase_window(tree_frame):
 
     cart_listbox = tk.Listbox(right_frame, width=40)
     cart_listbox.pack(padx=10, pady=10)
+
+    ttk.Button(right_frame, text="הסר פריט נבחר", command=remove_selected_item_from_cart).pack(pady=5)
+
 
     total_label = ttk.Label(right_frame, text="סה\"כ לתשלום: ₪0.00")
     total_label.pack(pady=5)
@@ -835,6 +1004,21 @@ def open_alerts_window(tree_frame, alerts_label, main_window):
 
         conn = connect_to_database()
         cursor = conn.cursor()
+
+        #עדכון אוטומטי של סטטוס זמינות לפי הכמות
+        cursor.execute("""
+        UPDATE inventory
+        SET is_active = FALSE
+        WHERE quantity = 0 AND is_active = TRUE
+        """)
+        cursor.execute("""
+        UPDATE inventory
+        SET is_active = TRUE
+        WHERE quantity > 0 AND is_active = FALSE
+        """)
+        conn.commit()
+
+        #שליפת פריטים עם כמות מתחת ל- 10
         cursor.execute("""
                 SELECT i.sku, i.branch_id, b.branch_name, b.branch_address, 
                        i.item_name, i.quantity, i.last_updated
@@ -897,6 +1081,47 @@ def open_alerts_window(tree_frame, alerts_label, main_window):
             alerts_label.config(text="✔ אין התראות", fg="green")
 
     refresh_alerts()
+def open_finance_window(tree_frame):
+    for widget in tree_frame.winfo_children():
+        widget.destroy()
+
+    left_frame = tk.LabelFrame(tree_frame, text="סניף מס' 1", padx=10, pady=10)
+    left_frame.pack(side="left", fill="both", expand=True, padx=10, pady=10)
+
+    right_frame = tk.LabelFrame(tree_frame, text="סניף מס' 2", padx=10, pady=10)
+    right_frame.pack(side="right", fill="both", expand=True, padx=10, pady=10)
+
+    connection = connect_to_database()
+    cursor = connection.cursor()
+
+    cursor.execute("SELECT branch_id, branch_name FROM branches ORDER BY branch_id LIMIT 2")
+    branches = cursor.fetchall()
+
+    def create_branch_finance_display(frame, branch_id, branch_name):
+        cursor.execute("SELECT SUM(total_price) FROM purchases WHERE branch_name = %s", (branch_id,))
+        income = cursor.fetchone()[0] or 0
+
+        cursor.execute("SELECT SUM(total_cost) FROM expenses WHERE branch_id = %s", (branch_id,))
+        expenses = cursor.fetchone()[0] or 0
+
+        net_profit = income - expenses
+
+        tk.Label(frame, text=f"שם הסניף: {branch_name}", font=("Arial", 14)).pack(pady=5)
+        tk.Label(frame, text=f"רווחים: {income:.2f} ₪", font=("Arial", 12), fg="green").pack(pady=5)
+        tk.Label(frame, text=f"הוצאות: {expenses:.2f} ₪", font=("Arial", 12), fg="red").pack(pady=5)
+        tk.Label(frame, text=f"קופה: {net_profit:.2f} ₪", font=("Arial", 14, "bold")).pack(pady=10)
+
+    # יצירת תצוגה לשני הסניפים
+    if len(branches) >= 1:
+        create_branch_finance_display(left_frame, branches[0][0], branches[0][1])
+    if len(branches) >= 2:
+        create_branch_finance_display(right_frame, branches[1][0], branches[1][1])
+
+    connection.close()
+
+
+
+
 
 
 def clear_inputs():
