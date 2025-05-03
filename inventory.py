@@ -1,14 +1,64 @@
 import os
 import shutil
 from datetime import datetime
-
 import mysql.connector
 import pandas as pd
-import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 from database import connect_to_database
-from PIL import Image, ImageTk
+from PIL import Image, ImageTk, ImageDraw
+import tkinter as tk
+from tkinter import ttk, messagebox
 
+# פונקציה לעדכון מפת המחסן לפי סניף
+def update_warehouse_map(parent_frame, branch_id, select_shelf, item_sku=None):
+    # ניקוי המדפים הקודמים
+    for widget in parent_frame.winfo_children():
+        widget.destroy()
+
+    shelf_rows, shelf_cols = 9, 9
+    occupied_slots = set()  # סט המיקומים תפוסים
+    selected_shelf = None  # משתנה לזיהוי מדף הפריט
+
+    try:
+        # שליפת המדפים תפוסים מתוך מסד הנתונים לפי branch_id
+        conn = connect_to_database()
+        cur = conn.cursor()
+        cur.execute("""
+             SELECT shelf_row, shelf_column FROM inventory
+             WHERE branch_id = %s
+         """, (branch_id,))
+        occupied_slots = set((r, c) for r, c in cur.fetchall())
+
+        # אם הוזן SKU של פריט, נסה לשלוף את המיקום שלו
+        if item_sku:
+            cur.execute("""
+                SELECT shelf_row, shelf_column FROM inventory
+                WHERE branch_id = %s AND SKU = %s
+            """, (branch_id, item_sku))
+            selected_shelf = cur.fetchone()
+
+        conn.close()
+    except Exception as e:
+        messagebox.showerror("שגיאה", f"שגיאה בטעינת המדפים: {e}")
+        return
+
+    # יצירת רשת המדפים
+    for r in range(1, shelf_rows + 1):
+        for c in range(1, shelf_cols + 1):
+            status = (r, c) in occupied_slots  # האם המדף תפוס
+            color = "#e74c3c" if status else "#2ecc71"  # אדום = תפוס, ירוק = פנוי
+
+            # אם יש מיקום ספציפי לפריט, סמן אותו בצבע שונה
+            if selected_shelf and (r, c) == selected_shelf:
+                color = "#f39c12"  # צבע צהוב לפריט שנמצא במיקום הזה
+
+            btn = tk.Button(
+                parent_frame, text=f"{r},{c}", width=4, height=2,
+                bg=color, fg="white", relief="raised",
+                state="disabled" if status else "normal",  # לא ניתן לבחור אם תפוס
+                command=lambda row=r, col=c: select_shelf(row, col)
+            )
+            btn.grid(row=r, column=c, padx=1, pady=1)
 
 def view_inventory(tree_frame):
     for widget in tree_frame.winfo_children():
@@ -18,76 +68,158 @@ def view_inventory(tree_frame):
         connection = connect_to_database()
         cursor = connection.cursor()
 
-        # שאילתה לשליפת כל הנתונים כולל השדות החדשים
-        cursor.execute(
-            """SELECT inventory.sku, inventory.item_name, inventory.category, inventory.quantity, inventory.price, 
-                      inventory.color, inventory.size, inventory.shelf_row, inventory.shelf_column,
-                      branches.branch_id, branches.branch_name, branches.branch_address, inventory.image_path
-               FROM inventory_system.inventory
-               INNER JOIN inventory_system.branches 
-               ON inventory.branch_id = branches.branch_id"""
-        )
+        cursor.execute("""
+            SELECT inventory.sku, inventory.item_name, inventory.category, inventory.quantity, inventory.price, 
+                   inventory.color, inventory.size, inventory.shelf_row, inventory.shelf_column,
+                   branches.branch_id, branches.branch_name, branches.branch_address, inventory.image_path
+            FROM inventory_system.inventory
+            INNER JOIN inventory_system.branches 
+            ON inventory.branch_id = branches.branch_id
+        """)
         rows = cursor.fetchall()
 
-        # הגדרת Treeview כולל השדות החדשים
-        tree = ttk.Treeview(
-            tree_frame,
-            columns=("SKU", "item_name", "category", "quantity", "price", "color", "size", "shelf_row", "shelf_column",
-                     "branch_id", "branch_name", "branch_address"),
-            show="headings"
-        )
+        # ===== מסגרת ראשית =====
+        main_frame = tk.Frame(tree_frame, bg="#f4f6f7")
+        main_frame.pack(fill="both", expand=True, padx=20, pady=20)
 
-        # רשימת העמודות כולל השדות החדשים
+        # ===== מסגרת חיפוש =====
+        search_frame = tk.Frame(main_frame, bg="#ffffff", bd=2, relief="groove")
+        search_frame.pack(fill="x", pady=(0, 10))
+
+        title_label = tk.Label(
+            search_frame, text="Inventory Search 🔍",
+            font=("Segoe UI", 24, "bold"), bg="#ffffff", fg="#2f3640"
+        )
+        title_label.grid(row=0, column=0, columnspan=10, pady=20)
+
+        # שדות חיפוש
+        fields = [
+            ("Item Name:", 1, 0),
+            ("Branch:", 1, 2),
+            ("Category:", 1, 4),
+            ("Color:", 1, 6)
+        ]
+
+        entries = {}
+
+        for text, r, c in fields:
+            label = tk.Label(search_frame, text=text, font=("Segoe UI", 16), bg="#ffffff")
+            label.grid(row=r, column=c, padx=10, pady=10, sticky="w")
+
+            if text == "Branch:":
+                branch_names = list(set([row[11] for row in rows]))
+                branch_names.sort()
+                branch_names.insert(0, "")
+                entry = ttk.Combobox(search_frame, values=branch_names, font=("Segoe UI", 14), state="readonly")
+                entry.current(0)
+            else:
+                entry = tk.Entry(search_frame, font=("Segoe UI", 14))
+
+            entry.grid(row=r, column=c + 1, padx=10, pady=10, sticky="ew")
+            entries[text] = entry
+
+        search_frame.grid_columnconfigure((1, 3, 5, 7), weight=1)
+
+        # ===== פונקציות סינון ורענון =====
+        def filter_inventory_advanced():
+            name = entries["Item Name:"].get().strip().lower()
+            branch = entries["Branch:"].get().strip().lower()
+            category = entries["Category:"].get().strip().lower()
+            color = entries["Color:"].get().strip().lower()
+
+            tree.delete(*tree.get_children())
+            for row in rows:
+                if (not name or name in row[1].lower()) and \
+                   (not category or category in row[2].lower()) and \
+                   (not color or color in row[5].lower()) and \
+                   (not branch or branch in row[11].lower()):
+                    tree.insert("", tk.END, values=row)
+
+        def reset_inventory():
+            for entry in entries.values():
+                if isinstance(entry, ttk.Combobox):
+                    entry.set("")
+                else:
+                    entry.delete(0, tk.END)
+            tree.delete(*tree.get_children())
+            for row in rows:
+                tree.insert("", tk.END, values=row)
+
+        # ===== כפתורי חיפוש =====
+        button_frame = tk.Frame(search_frame, bg="#ffffff")
+        button_frame.grid(row=2, column=0, columnspan=10, pady=10)
+
+        search_button = tk.Button(button_frame, text="Search", command=filter_inventory_advanced,
+                                  font=("Segoe UI", 16, "bold"), bg="#3498db", fg="white",
+                                  activebackground="#2980b9", relief="flat", padx=20, pady=5)
+        search_button.pack(side="left", padx=10)
+
+        refresh_button = tk.Button(button_frame, text="Reset", command=reset_inventory,
+                                   font=("Segoe UI", 16, "bold"), bg="#95a5a6", fg="white",
+                                   activebackground="#7f8c8d", relief="flat", padx=20, pady=5)
+        refresh_button.pack(side="left", padx=10)
+
+        # ===== טבלת תוצאות =====
+        table_frame = tk.Frame(main_frame, bg="#f4f6f7")
+        table_frame.pack(fill="both", expand=True)
+
+        style = ttk.Style()
+        style.theme_use("clam")
+        style.configure("Custom.Treeview",
+                        background="#ffffff",
+                        foreground="#2c3e50",
+                        fieldbackground="#ffffff",
+                        rowheight=35,
+                        font=("Segoe UI", 11))
+        style.configure("Custom.Treeview.Heading",
+                        background="#34495e",
+                        foreground="white",
+                        font=("Segoe UI", 18, "bold"))
+        style.map("Custom.Treeview", background=[("selected", "#d0ebff")])
+
+        tree = ttk.Treeview(table_frame,
+                            columns=("SKU", "item_name", "category", "quantity", "price", "color", "size", "shelf_row", "shelf_column",
+                                     "branch_id", "branch_name", "branch_address"),
+                            show="headings",
+                            style="Custom.Treeview")
+
         columns = ["SKU", "item_name", "category", "quantity", "price", "color", "size", "shelf_row", "shelf_column",
                    "branch_id", "branch_name", "branch_address"]
 
         for col in columns:
             tree.heading(col, text=col)
-            tree.column(col, anchor="center", width=100)
+            tree.column(col, anchor="center", width=120)
 
-        # הוספת נתונים לטבלה
         for row in rows:
             tree.insert("", tk.END, values=row)
 
         tree.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
 
-        # הצגת תמונה של פריט
-        image_label = ttk.Label(tree_frame)
-        image_label.pack(pady=10)
-
+        # ===== הצגת תמונה =====
         def display_item_image(event):
             selected_item = tree.selection()
             if selected_item:
                 item_data = tree.item(selected_item, "values")
-                image_path = item_data[-1]  # image_path נמצא בעמודה האחרונה בשאילתה
+                image_path = item_data[-1]
                 if image_path and os.path.exists(image_path):
-                    image = Image.open(image_path)
-                    image = image.resize((150, 150), Image.Resampling.LANCZOS)
-                    photo = ImageTk.PhotoImage(image)
-                    image_label.config(image=photo)
-                    image_label.image = photo
+                    try:
+                        image = Image.open(image_path)
+                        image = image.resize((180, 180), Image.Resampling.LANCZOS)
+                        photo = ImageTk.PhotoImage(image)
+                        image_label.config(image=photo)
+                        image_label.image = photo
+                    except Exception:
+                        image_label.config(image="")
                 else:
                     image_label.config(image="")
-                    messagebox.showinfo("תמונה", "אין תמונה לפריט זה.")
 
         tree.bind("<<TreeviewSelect>>", display_item_image)
 
-        # מסגרת חיפוש
-        search_frame = ttk.LabelFrame(tree_frame, text="חיפוש מלאי")
-        search_frame.pack(padx=10, pady=10, fill="x")
+        image_frame = tk.Frame(main_frame, bg="#ffffff", bd=2, relief="groove")
+        image_frame.pack(fill="x", pady=10)
 
-        ttk.Label(search_frame, text="חפש לפי שם פריט:").grid(row=0, column=0, padx=5, pady=5)
-        search_entry = ttk.Entry(search_frame)
-        search_entry.grid(row=0, column=1, padx=5, pady=5)
-
-        def filter_inventory():
-            search_term = search_entry.get().strip().lower()
-            tree.delete(*tree.get_children())
-            for row in rows:
-                if search_term in row[1].lower():  # חיפוש לפי שם פריט
-                    tree.insert("", tk.END, values=row)
-
-        ttk.Button(search_frame, text="חפש", command=filter_inventory).grid(row=0, column=2, padx=5, pady=5)
+        image_label = tk.Label(image_frame, bg="#ffffff")
+        image_label.pack(pady=15)
 
     except mysql.connector.Error as e:
         messagebox.showerror("שגיאה", f"שגיאה בעת שליפת המלאי: {e}")
@@ -95,121 +227,231 @@ def view_inventory(tree_frame):
         if connection:
             connection.close()
 
-
-
 def open_add_item_window(tree_frame):
+    # ניקוי המסגרת הקודמת
     for widget in tree_frame.winfo_children():
         widget.destroy()
 
-    def add_item():
-        name = entry_name.get()
-        SKU = entry_SKU.get()
-        category = entry_category.get()
-        quantity = entry_quantity.get()
-        price = entry_price.get()
-        branch = entry_branch.get()
-        color = entry_color.get()
-        size = entry_size.get()
-        shelf_row = entry_shelf_row.get()
-        shelf_column = entry_shelf_column.get()
+    # שליפת סניפים מתוך DB
+    try:
+        conn = connect_to_database()
+        cur = conn.cursor()
+        cur.execute("SELECT branch_id, branch_name FROM branches")
+        branch_data = cur.fetchall()
+        conn.close()
+    except Exception as e:
+        messagebox.showerror("שגיאה", f"לא ניתן לטעון סניפים: {e}")
+        branch_data = []
 
-        if not (name and SKU and category and quantity.isdigit() and price.replace('.', '', 1).isdigit() and branch and
-                color and size and shelf_row.isdigit() and shelf_column.isdigit() and image_path):
-            messagebox.showerror("שגיאה", "אנא מלא את כל השדות בצורה נכונה")
-            return
+    branch_dict = {name: bid for bid, name in branch_data}
+    branch_names = [""] + sorted(branch_dict.keys())
 
+
+     # פונקציה לבחירת מיקום מדף
+    def select_shelf(row, col):
+        entries["shelf_row"].delete(0, tk.END)
+        entries["shelf_row"].insert(0, str(row))
+        entries["shelf_column"].delete(0, tk.END)
+        entries["shelf_column"].insert(0, str(col))
+
+    def refresh_map():
+        branch_name = entries["branch"].get()
+        branch_id = branch_dict.get(branch_name, -1)
+        if branch_id != -1:
+            update_warehouse_map(warehouse_frame, branch_id, select_shelf)
+
+    # פונקציות עזר
+    image_path = {"val": None}  # משתמש במילון כדי לעדכן מתוך nested
+
+    def display_image(image_path):
         try:
-            connection = connect_to_database()
-            cursor = connection.cursor()
+            image = Image.open(image_path)
+            image.thumbnail((200, 200), Image.Resampling.LANCZOS)
+            photo = ImageTk.PhotoImage(image)
+            image_label.config(image=photo)
+            image_label.image = photo
 
-            if not os.path.exists("images"):
-                os.makedirs("images")
+            def zoom_image():
+                top = tk.Toplevel()
+                top.title("תצוגת תמונה")
+                big_img = Image.open(image_path)
+                big_photo = ImageTk.PhotoImage(big_img)
+                label = tk.Label(top, image=big_photo)
+                label.image = big_photo
+                label.pack()
 
-            image_filename = os.path.join("images", os.path.basename(image_path))
-            shutil.copy(image_path, image_filename)
+            image_label.bind("<Button-1>", lambda e: zoom_image())
 
-            cursor.execute(
-                """INSERT INTO inventory (item_name, SKU, category, quantity, price, branch_id, color, size, shelf_row, shelf_column, image_path) 
-                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
-                (name, SKU, category, int(quantity), float(price), branch, color, size, int(shelf_row), int(shelf_column), image_filename)
-            )
-            connection.commit()
-
-            messagebox.showinfo("הצלחה", "הפריט נוסף בהצלחה")
-
-            popup = tk.Toplevel()
-            popup.title("תעודת קבלת סחורה")
-            msg = f"""
-                   תעודת קבלה
-                  ------------------------
-                  {name}פריט :
-                  {SKU}:SKU
-                 כמות: {quantity}
-                  מחיר ליחידה: ₪{price}
-                סניף: {branch}
-                תאריך: {datetime.now().strftime('%Y-%m-%d %H:%M')}
-                  """
-            tk.Label(popup, text=msg, font=("Arial", 12), justify="right").pack(padx=50, pady=50)
-
-        except mysql.connector.Error as e:
-            messagebox.showerror("שגיאה", f"שגיאה בהנפקת תעודה: {e}")
-
-            clear_inputs()
-
-        except mysql.connector.Error as e:
-            messagebox.showerror("שגיאה", f"שגיאה בעת הוספת הפריט: {e}")
-
-        finally:
-            if connection:
-                connection.close()
+        except Exception as e:
+            messagebox.showerror("שגיאה", f"לא ניתן לטעון את התמונה: {e}")
 
     def select_image():
-        nonlocal image_path
-        image_path = filedialog.askopenfilename(title="בחר תמונה", filetypes=[("Image Files", "*.png;*.jpg;*.jpeg;*.gif")])
-        if image_path:
-            display_image(image_path)
-            messagebox.showinfo("תמונה נבחרה", f"תמונה נבחרה: {os.path.basename(image_path)}")
-
-    def display_image(image_file):
-        image = Image.open(image_file)
-        image = image.resize((150, 150), Image.Resampling.LANCZOS)
-        photo = ImageTk.PhotoImage(image)
-        image_label.config(image=photo)
-        image_label.image = photo
+        file_path = filedialog.askopenfilename(filetypes=[("Images", "*.png;*.jpg;*.jpeg;*.gif")])
+        if file_path:
+            image_path_var.set(file_path)
+            image_path["val"] = image_path_var  # תעדכן גם את המילון
+            display_image(file_path)
 
     def clear_inputs():
-        for entry in entries:
-            entry.delete(0, tk.END)
+        for w in entries.values():
+            if isinstance(w, ttk.Entry):
+                w.delete(0, tk.END)
+            elif isinstance(w, ttk.Combobox):
+                w.set("")
         image_label.config(image="")
+        image_label.image = None
+        image_path["val"] = None
 
-    add_item_frame = ttk.LabelFrame(tree_frame, text="הוספת פריט חדש")
-    add_item_frame.pack(padx=90, pady=80, fill="both", expand=True)
+    def add_item():
+        # קריאת ערכים
+        name     = entries["name"].get().strip()
+        sku      = entries["SKU"].get().strip()
+        category = entries["category"].get().strip()
+        qty      = entries["quantity"].get().strip()
+        price    = entries["price"].get().strip()
+        branch_n = entries["branch"].get().strip()
+        color    = entries["color"].get().strip()
+        size     = entries["size"].get().strip()
+        row      = entries["shelf_row"].get().strip()
+        col      = entries["shelf_column"].get().strip()
+        img_p    = image_path["val"].get()
 
-    fields = [
-        ("שם פריט", "name"), ("SKU", "SKU"), ("קטגוריה", "category"), ("כמות", "quantity"),
-        ("מחיר", "price"), ("סניף", "branch"), ("צבע", "color"), ("מידה", "size"),
-        ("שורת מדף", "shelf_row"), ("עמודת מדף", "shelf_column")
-    ]
+        # ולידציה
+        if not (name and sku and category and qty.isdigit()
+                and price.replace('.', '', 1).isdigit()
+                and branch_n in branch_dict
+                and color and size and row.isdigit() and col.isdigit()
+                and img_p):
+            messagebox.showerror("שגיאה", "אנא מלא/י את השדות כראוי כולל תמונה")
+            return
 
-    global entry_name, entry_SKU, entry_category, entry_quantity, entry_price, entry_branch, entry_color, entry_size, entry_shelf_row, entry_shelf_column
-    entries = [ttk.Entry(add_item_frame) for _ in fields]
-    (entry_name, entry_SKU, entry_category, entry_quantity, entry_price, entry_branch,
-     entry_color, entry_size, entry_shelf_row, entry_shelf_column) = entries
+        # שמירת תמונה בתיקיה המקומית
+        os.makedirs("images", exist_ok=True)
+        img_p = os.path.join("images", os.path.basename(img_p))
+        dest_path = os.path.join("images", os.path.basename(img_p))
+        shutil.copy(image_path["val"].get(), dest_path)
 
-    for i, (label, entry) in enumerate(zip(fields, entries)):
-        ttk.Label(add_item_frame, text=label[0]).grid(row=i, column=0, padx=5, pady=5, sticky="e")
-        entry.grid(row=i, column=1, padx=5, pady=5, sticky="w")
+        # הוספה למסד
+        try:
+            conn = connect_to_database()
+            cur  = conn.cursor()
+            cur.execute(
+                """INSERT INTO inventory
+                   (item_name, SKU, category, quantity, price, branch_id, color, size, shelf_row, shelf_column, image_path)
+                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+                (
+                    name, sku, category, int(qty), float(price),
+                    branch_dict[branch_n], color, size,
+                    int(row), int(col), img_p
+                )
+            )
+            conn.commit()
+        except Exception as e:
+            messagebox.showerror("שגיאה", f"לא ניתן להוסיף פריט: {e}")
+            return
+        finally:
+            conn.close()
 
-    image_path = None
-    ttk.Button(add_item_frame, text="בחר תמונה", command=select_image).grid(row=len(fields), column=0, columnspan=2, pady=10)
+        # תעודת קבלה מעוצבת
+        receipt = tk.Toplevel()
+        receipt.title("🧾 תעודת קבלת סחורה")
+        receipt.configure(bg="#ffffff")
+        txt = (
+            f"🧾 תעודת קבלה\n\n"
+            f"פריט: {name}\n"
+            f"SKU: {sku}\n"
+            f"כמות: {qty}\n"
+            f"מחיר יחידה: ₪{price}\n"
+            f"סניף: {branch_n}\n"
+            f"תאריך: {datetime.now().strftime('%Y-%m-%d %H:%M')}"
+        )
+        tk.Label(
+            receipt, text=txt,
+            font=("Segoe UI", 13), justify="right",
+            bg="#ffffff", fg="#333"
+        ).pack(padx=40, pady=30)
 
-    image_label = ttk.Label(add_item_frame)
-    image_label.grid(row=len(fields) + 1, column=0, columnspan=2, pady=10)
+        messagebox.showinfo("הצלחה", "הפריט נוסף בהצלחה!")
 
-    ttk.Button(add_item_frame, text="הוסף פריט", command=add_item).grid(row=len(fields) + 2, column=0, columnspan=2, pady=10)
+    # שדות ומילון תואם
+    labels = {
+        "SKU": "SKU 🔎",
+        "name": "שם פריט ✏️",
+        "category": "קטגוריה 🏷️",
+        "quantity": "כמות 📦",
+        "price": "מחיר 💲",
+        "branch": "סניף 🏬",
+        "color": "צבע 🎨",
+        "size": "מידה 📏",
+        "shelf_row": "שורה במדף 🛒",
+        "shelf_column": "טור במדף 🛒",
+        "val" : "נתיב תמונה 📷"
+    }
 
-    add_item_frame.place(relx=0.5, rely=0.5, anchor="center")
+    entries = {}
 
+
+    add_frame = tk.Frame(tree_frame, bg="#ffffff", width=1000, height=1000)
+    add_frame.pack(fill="both", expand=True, padx=2, pady=2)
+    add_frame.pack_propagate(0)  # חשוב כדי למנוע שינוי אוטומטי של הגודל
+
+    for idx, (key, label_text) in enumerate(labels.items()):
+        tk.Label(add_frame, text=label_text, bg="#ffffff", anchor="w", font=("Segoe UI", 16)) \
+            .grid(row=idx + 1, column=0, padx=15, pady=15, sticky="w")
+
+        if key == "branch":
+            entry = ttk.Combobox(add_frame, values=branch_names, width=28, state="readonly")
+            entry.bind("<<ComboboxSelected>>", lambda e: refresh_map())
+        else:
+            entry = ttk.Entry(add_frame, width=30)
+
+        entry.grid(row=idx + 1, column=1, padx=15, pady=15, sticky="w")
+        entries[key] = entry
+
+    # כפתור בחירת תמונה + תצוגה
+    # כותרת
+    tk.Label(
+        add_frame, text="🆕 הוספת פריט חדש", font = ("Segoe UI", 25, "bold"),bg = "#ffffff",
+        fg = "#2f3640").grid(row=0, column=2, columnspan=4, pady=5, sticky="e")
+
+    # --- תצוגת מפת מחסן ---
+    warehouse_frame = tk.Frame(add_frame, bg="#ffffff")
+    warehouse_frame.grid(row=2, column=8, rowspan=12, padx=(40, 0), sticky="e")
+
+    # כותרת מפת המחסן
+    tk.Label(
+        add_frame, text="📦 מפת המחסן", font=("Segoe UI", 25, "bold"),
+        bg="#ffffff", fg="#2f3640"
+    ).grid(row=1, column=8, columnspan=4, pady=5, sticky="e")
+
+    image_path_var = tk.StringVar()
+    image_entry = ttk.Entry(add_frame, textvariable=image_path_var, width=30)
+    image_entry.grid(row=11, column=1, padx=10, pady=10, sticky="w")
+
+
+    image_label = tk.Label(add_frame, bg="#ffffff")
+    image_label.grid(row=2, column=2, rowspan=4, padx=10, pady=10)
+
+    # כפתורים
+    tk.Button(add_frame, text="בחר תמונה 📷", command=select_image,
+              bg="#3498db", fg="white", font=("Segoe UI", 16), relief="flat") \
+        .grid(row=11, column=2, padx=10, pady=10)
+
+
+    tk.Button(add_frame, text="add ✔️", command=add_item,
+              bg="#27ae60", fg="white", font=("Segoe UI", 16), relief="flat") \
+        .grid(row=12, column=2, padx=10, pady=10)
+
+    # כפתור רענון מפת המחסן
+    btn_refresh = tk.Button(
+        add_frame, text="🔄 טען מדפים",
+        bg="#3498db", fg="white", font=("Segoe UI", 16), relief="flat",
+        command= refresh_map)
+    btn_refresh.grid(row=12, column=3, padx=10, pady=10)
+
+    tk.Button(add_frame, text="נקה 🧹", command=clear_inputs,
+              bg="#e67e22", fg="white", font=("Segoe UI", 16), relief="flat") \
+        .grid(row=12, column=4, padx=10, pady=10)
 
 def open_update_item_window(tree_frame):
     for widget in tree_frame.winfo_children():
@@ -252,7 +494,7 @@ def open_update_item_window(tree_frame):
             # רישום הוצאה רק אם נוספה כמות
             if add_qty > 0:
                 total_cost = add_qty * float(price)
-                cursor.execute("""
+                cursor.execute(""" 
                         INSERT INTO expenses (branch_id, sku, item_name, quantity_added, unit_price, total_cost)
                         VALUES (%s, %s, %s, %s, %s, %s)
                     """, (branch, sku, name, add_qty, float(price), total_cost))
@@ -266,21 +508,25 @@ def open_update_item_window(tree_frame):
 
                 popup = tk.Toplevel()
                 popup.title("תעודת קבלת סחורה")
-                msg = f"""
-                                    תעודת קבלה
-                                    ------------------------
-                                     {name}פריט:
-                                     SKU: {sku}
-                                    כמות: {add_qty}
-                                    מחיר ליחידה: ₪{price}
-                                    סך הכול: ₪{total_cost}
-                                    סניף: {branch}
-                                    תאריך: {datetime.now().strftime('%Y-%m-%d %H:%M')}
-                                    """
-                tk.Label(popup, text=msg, font=("Arial", 12), justify="right").pack(padx=50, pady=50)
+                popup.configure(bg="#ffffff")
+                total_cost = price * add_qty
 
-        except mysql.connector.Error as e:
-            messagebox.showerror("שגיאה", f"שגיאה בהנפקת תעודה: {e}")
+                fields = [
+                    ("שם פריט:", name),
+                    ("SKU:", sku),
+                    ("כמות נוספת:", add_qty),
+                    ("מחיר ליחידה:", f"₪{price}"),
+                    ("סכום כולל:", f"₪{total_cost}"),
+                    ("סניף:", branch),
+                    ("תאריך:", datetime.now().strftime('%Y-%m-%d %H:%M'))
+                ]
+
+                for i, (label, value) in enumerate(fields):
+                    ttk.Label(popup, text=label, font=("Arial", 11, "bold")).grid(row=i, column=0, sticky="e", padx=10,
+                                                                                  pady=5)
+                    ttk.Label(popup, text=value, font=("Arial", 11)).grid(row=i, column=1, sticky="w", padx=10, pady=5)
+
+                ttk.Button(popup, text="סגור", command=popup.destroy).grid(row=len(fields), columnspan=2, pady=20)
 
             clear_inputs()
         except mysql.connector.Error as e:
@@ -325,6 +571,16 @@ def open_update_item_window(tree_frame):
                 entry_shelf_column.insert(0, str(item[8]))
                 image_path_var.set(item[9])
 
+                # פונקציה שתתעדכן בעת לחיצה על מדף במפה
+                def select_shelf(row, column):
+                    entry_shelf_row.delete(0, tk.END)
+                    entry_shelf_column.delete(0, tk.END)
+                    entry_shelf_row.insert(0, str(row))
+                    entry_shelf_column.insert(0, str(column))
+
+                # עדכון מפת המחסן לפי הסניף של הפריט
+                update_warehouse_map(warehouse_map_frame, item[4], select_shelf)
+
                 if item[9] and os.path.exists(item[9]):
                     display_image(item[9])
                 else:
@@ -348,55 +604,91 @@ def open_update_item_window(tree_frame):
     def display_image(image_path):
         try:
             image = Image.open(image_path)
-            image = image.resize((150, 150), Image.Resampling.LANCZOS)
+            image.thumbnail((150, 150), Image.Resampling.LANCZOS)
             photo = ImageTk.PhotoImage(image)
             image_label.config(image=photo)
             image_label.image = photo
+
+            def zoom_image():
+                top = tk.Toplevel()
+                top.title("תצוגת תמונה")
+                big_img = Image.open(image_path)
+                big_photo = ImageTk.PhotoImage(big_img)
+                label = tk.Label(top, image=big_photo)
+                label.image = big_photo
+                label.pack()
+
+            image_label.bind("<Button-1>", lambda e: zoom_image())
+
         except Exception as e:
             messagebox.showerror("שגיאה", f"לא ניתן לטעון את התמונה: {e}")
 
-    update_item_frame = ttk.LabelFrame(tree_frame, text="עדכון פריט")
-    update_item_frame.pack(padx=90, pady=80, fill="both", expand=True)
+    image_path = {"val": None}  # משתמש במילון כדי לעדכן מתוך nested
+
+    def clear_inputs():
+        for w in entries:
+            if isinstance(w, ttk.Entry):
+                w.delete(0, tk.END)
+            elif isinstance(w, ttk.Combobox):
+                w.set("")
+        image_label.config(image="")
+        image_label.image = None
+        image_path["val"] = None
 
     global entry_sku, entry_name, entry_category, entry_quantity, entry_price, entry_branch, entry_color, entry_size, entry_shelf_row, entry_shelf_column
-    global image_label, image_path_var
+    global image_label, image_path_var, warehouse_map_frame
 
-    entry_sku = ttk.Entry(update_item_frame)
-    ttk.Label(update_item_frame, text="SKU של הפריט הקיים:").grid(row=0, column=0, padx=5, pady=5, sticky="e")
-    entry_sku.grid(row=0, column=1, padx=5, pady=5)
-    ttk.Button(update_item_frame, text="טען פריט", command=load_item_details).grid(row=0, column=2, padx=5, pady=5)
+    # מסגרת ראשית
+    update_item_frame = tk.Frame(tree_frame, bg="#ffffff")
+    update_item_frame.pack(fill="both", expand=True, padx=2, pady=2)
 
-    fields = [("שם פריט", "name"), ("קטגוריה", "category"), ("כמות", "quantity"), ("מחיר", "price"), ("סניף", "branch"),
-              ("צבע", "color"), ("מידה", "size"), ("שורת מדף", "shelf_row"), ("עמודת מדף", "shelf_column")]
+    # כותרת
+    tk.Label(update_item_frame, text="🆕 Update Item", font=("Segoe UI", 25, "bold"),
+             bg="#ffffff", fg="#2f3640").grid(row=0, column=8, columnspan=4, pady=5)
 
-    entry_name, entry_category, entry_quantity, entry_price, entry_branch, entry_color, entry_size, entry_shelf_row, entry_shelf_column = \
-        [ttk.Entry(update_item_frame) for _ in fields]
+    # שדות טקסט
+    labels = ["SKU 🔎", "שם פריט ✏️", "קטגוריה 🏷️", "כמות 📦", "הוספת כמות ➕",
+              "מחיר 💲", "סניף 🏬", "צבע 🎨", "מידה 📏", "שורה במדף 🛒", "טור במדף 🛒", "נתיב תמונה 📷"]
+    entries = []
+    for idx, text in enumerate(labels):
+        tk.Label(update_item_frame, text=text, bg="#ffffff", anchor="w", font=("Segoe UI", 16)) \
+            .grid(row=idx + 1, column=0, padx=15, pady=15, sticky="w")
+        entry = ttk.Entry(update_item_frame, width=30)
+        entry.grid(row=idx + 1, column=1, padx=15, pady=15, sticky="w")
+        entries.append(entry)
 
-    for i, (label, entry) in enumerate(
-            zip(fields, [entry_name, entry_category, entry_quantity, entry_price, entry_branch,
-                         entry_color, entry_size, entry_shelf_row, entry_shelf_column])):
-        ttk.Label(update_item_frame, text=label[0]).grid(row=i + 1, column=0, padx=5, pady=5, sticky="e")
-        entry.grid(row=i + 1, column=1, padx=5, pady=5, sticky="w")
+    (entry_sku, entry_name, entry_category, entry_quantity, entry_add_quantity,
+     entry_price, entry_branch, entry_color, entry_size, entry_shelf_row,
+     entry_shelf_column) = entries[:11]
 
-    # שדה חדש: כמות להוספה
-    ttk.Label(update_item_frame, text="כמות להוספה:").grid(row=3, column=2, padx=5, pady=5, sticky="e")
-    entry_add_quantity = ttk.Entry(update_item_frame)
-    entry_add_quantity.grid(row=3, column=3, padx=5, pady=5, sticky="w")
-
-    # שדה בחירת תמונה
     image_path_var = tk.StringVar()
-    ttk.Label(update_item_frame, text="נתיב תמונה:").grid(row=len(fields) + 1, column=0, padx=5, pady=5, sticky="e")
-    ttk.Entry(update_item_frame, textvariable=image_path_var, width=50).grid(row=len(fields) + 1, column=1, padx=5,
-                                                                             pady=5, sticky="w")
-    ttk.Button(update_item_frame, text="בחר תמונה", command=select_image).grid(row=len(fields) + 1, column=2, padx=5,
-                                                                               pady=5)
+    image_entry = ttk.Entry(update_item_frame, textvariable=image_path_var, width=30)
+    image_entry.grid(row=12, column=1, padx=10, pady=10, sticky="w")
 
-    # תצוגת תמונה
-    image_label = ttk.Label(update_item_frame)
-    image_label.grid(row=len(fields) + 2, columnspan=3, pady=10)
+    # תמונה
+    image_label = tk.Label(update_item_frame)
+    image_label.grid(row=1, column=2, rowspan=8, padx=30, pady=30)
 
-    ttk.Button(update_item_frame, text="עדכן פריט", command=update_item).grid(row=len(fields) + 3, columnspan=3,
-                                                                              pady=10)
+    # כפתורים
+    tk.Button(update_item_frame, text="בחר תמונה 📷", command=select_image,
+              bg="#3498db", fg="white", font=("Segoe UI", 16), relief="flat") \
+        .grid(row=12, column=2, padx=10, pady=10)
+
+    tk.Button(update_item_frame, text="טען פריט 🔎", command=load_item_details,
+              bg="#2ecc71", fg="white", font=("Segoe UI", 16), relief="flat") \
+        .grid(row=1, column=2, padx=10, pady=10)
+
+    tk.Button(update_item_frame, text="עדכן פריט ✔️", command=update_item,
+              bg="#27ae60", fg="white", font=("Segoe UI", 16), relief="flat") \
+        .grid(row=12, column=3, padx=10, pady=10)
+
+    tk.Button(update_item_frame, text="נקה 🧹", command=clear_inputs,
+              bg="#e67e22", fg="white", font=("Segoe UI", 16), relief="flat") \
+        .grid(row=12, column=4, padx=10, pady=10)
+
+    # הוספת מפת מחסן
+    warehouse_map_frame = tk.Frame(update_item_frame, bg="#ffffff")
+    warehouse_map_frame.grid(row=2, column=5, rowspan=8, padx=10, pady=10,sticky="e")
 
 
 def open_delete_item_window(tree_frame):
@@ -404,23 +696,22 @@ def open_delete_item_window(tree_frame):
         widget.destroy()
 
     def update_item_visibility():
-        sku = entry_sku.get().strip()
-        if not sku:
-            messagebox.showerror("שגיאה", "אנא הזן את ה-SKU של הפריט שברצונך לעדכן")
+        selected_item = tree.focus()
+        if not selected_item:
+            messagebox.showwarning("שים לב", "אנא בחר פריט מתוך הרשימה")
             return
+
+        sku = tree.item(selected_item)['values'][0]
 
         try:
             connection = connect_to_database()
             cursor = connection.cursor()
-
             cursor.execute("UPDATE inventory SET is_active = FALSE WHERE sku = %s", (sku,))
             connection.commit()
 
-            if cursor.rowcount == 0:
-                messagebox.showerror("שגיאה", "לא נמצא פריט עם ה-SKU שסיפקת")
-            else:
-                messagebox.showinfo("הצלחה", "הפריט סומן כלא זמין")
-                refresh_items_table()
+
+            messagebox.showinfo("הצלחה", "הפריט סומן כלא זמין")
+            refresh_items_table()
 
         except mysql.connector.Error as e:
             messagebox.showerror("שגיאה", f"שגיאה בעדכון הפריט: {e}")
@@ -429,15 +720,14 @@ def open_delete_item_window(tree_frame):
                 connection.close()
 
     def refresh_items_table():
-        for row in items_tree.get_children():
-            items_tree.delete(row)
+        for row in tree.get_children():
+            tree.delete(row)
 
         #עדכון סטטוס אוטומטי לפי כמות
         try:
             connection = connect_to_database()
             curses = connection.cursor()
             curses.execute("UPDATE inventory SET is_active = FALSE WHERE quantity = 0 AND is_active = TRUE")
-            curses.execute("UPDATE inventory SET is_active = TRUE WHERE quantity > 0 AND is_active = FALSE")
         except mysql.connector.Error as e:
             messagebox.showerror("שגיאה", f"שגיאה בעדכון סטטוס פריטים: {e}")
         finally:
@@ -460,7 +750,7 @@ def open_delete_item_window(tree_frame):
                 sku, name, qty, active = row
                 status = "זמין" if active else "לא-זמין"
                 tag = "active" if active else "inactive"
-                items_tree.insert("", "end", values=(sku, name, qty, status), tags=(tag,))
+                tree.insert("", "end", values=(sku, name, qty, status), tags=(tag,))
 
         except mysql.connector.Error as e:
             messagebox.showerror("שגיאה", f"שגיאה בשליפת פריטים: {e}")
@@ -469,12 +759,12 @@ def open_delete_item_window(tree_frame):
                 connection.close()
 
     def restore_selected_item():
-        selected_item = items_tree.focus()
+        selected_item = tree.focus()
         if not selected_item:
             messagebox.showwarning("שים לב", "אנא בחר פריט מתוך הרשימה")
             return
 
-        sku = items_tree.item(selected_item)['values'][0]
+        sku = tree.item(selected_item)['values'][0]
         try:
             connection = connect_to_database()
             cursor = connection.cursor()
@@ -489,40 +779,71 @@ def open_delete_item_window(tree_frame):
             if connection:
                 connection.close()
 
-    # ---------------- תצוגת ממשק ---------------- #
-    delete_item_frame = ttk.LabelFrame(tree_frame, text="ניהול זמינות פריטים")
-    delete_item_frame.pack(padx=40, pady=40, fill="both", expand=True)
 
-    input_frame = ttk.Frame(delete_item_frame)
-    input_frame.pack(pady=10)
+    # כותרת
+    delete_item_frame=tk.LabelFrame(tree_frame, text="🗑️ ניהול זמינות פריטים",font=("Segoe UI", 24, "bold"), bg="#ffffff", fg="#2c3e50")
+    delete_item_frame.pack(fill="both", padx=20, pady=(10, 20))
 
-    ttk.Label(input_frame, text="הזן SKU:").grid(row=0, column=0, padx=5, pady=5)
-    entry_sku = ttk.Entry(input_frame, width=30)
-    entry_sku.grid(row=0, column=1, padx=5, pady=5)
-    ttk.Button(input_frame, text="הסתר פריט", command=update_item_visibility).grid(row=0, column=2, padx=10)
+    tk.Label(delete_item_frame, text="🔎Enter The SKU:", font=("Segoe UI", 18, "bold"),
+        bg="#ffffff", fg="#34495e").grid(row=0, column=0, padx=5, pady=5)
 
-    # תיבת סימון
+    entry_sku = ttk.Entry(delete_item_frame, font=("Segoe UI", 11), width=25)
+    entry_sku.grid(row=0, column=1, padx=10, pady=8)
+
+    btn_hide = tk.Button(
+        delete_item_frame, text="🚫 הסתר פריט", font=("Segoe UI", 12, "bold"),
+        bg="#e74c3c", fg="white", activebackground="#c0392b",
+        relief="flat", padx=15, pady=6, command=update_item_visibility
+    )
+    btn_hide.grid(row=0, column=2, padx=10, pady=8)
+
+    # כפתור החזרת פריט
+    btn_restore = tk.Button(
+        delete_item_frame, text="♻️ החזר פריט פעיל", font=("Segoe UI", 12, "bold"),
+        bg="#2ecc71", fg="white", activebackground="#27ae60",
+        relief="flat", padx=20, pady=8, command=restore_selected_item
+    )
+    btn_restore.grid(row=0, column=3, padx=10, pady=8)
+
+    # צ'קבוקס
     show_hidden_var = tk.BooleanVar()
-    show_hidden_checkbox = ttk.Checkbutton(delete_item_frame, text="הצג גם פריטים מוסתרים",
-                                           variable=show_hidden_var, command=refresh_items_table)
-    show_hidden_checkbox.pack(pady=5)
+    show_hidden_checkbox = ttk.Checkbutton(
+        delete_item_frame, text="הצג גם פריטים מוסתרים",
+        variable=show_hidden_var, command=refresh_items_table
+    )
+    show_hidden_checkbox.grid(row=0, column=4, padx=10, pady=8)
 
-    # טבלה
-    columns = ("SKU", "שם פריט", "כמות", "סטטוס")
-    items_tree = ttk.Treeview(delete_item_frame, columns=columns, show="headings", height=12)
+    # ----- עץ -----
+
+    columns = (
+    "SKU", "Item_name", "Quantity", "Status")
+    tree = ttk.Treeview(tree_frame, columns=columns, show="headings", selectmode="browse")
+
+    style = ttk.Style()
+    style.theme_use("clam")
+    style.configure("Custom.Treeview",
+                    background="#ffffff",
+                    foreground="#2c3e50",
+                    fieldbackground="#ffffff",
+                    rowheight=35,
+                    font=("Segoe UI", 25))
+    style.configure("Custom.Treeview.Heading",
+                    background="#34495e",
+                    foreground="white",
+                    font=("Segoe UI", 25, "bold"))
+    style.map("Custom.Treeview", background=[("selected", "#d0ebff")])
+
     for col in columns:
-        items_tree.heading(col, text=col)
-        items_tree.column(col, anchor="center", width=100)
+        tree.heading(col, text=col)
+        tree.column(col, anchor="center", width=120)
 
-    items_tree.pack(padx=10, pady=10, fill="both", expand=True)
+    tree.pack(fill=tk.BOTH, expand=True, padx=20, pady=(20, 10))
 
-    # הגדרת צבעים
-    items_tree.tag_configure("active", background="#e6ffe6")     # ירוק בהיר
-    items_tree.tag_configure("inactive", background="#ffe6e6")   # אדום בהיר
+    # עיצוב צבעים לשורות
+    tree.tag_configure("active", background="#e6ffe6")  # ירוק בהיר
+    tree.tag_configure("inactive", background="#ffe6e6")  # אדום בהיר
 
-    # כפתור להחזרת פריט
-    ttk.Button(delete_item_frame, text="החזר פריט פעיל", command=restore_selected_item).pack(pady=10)
-
+    # קריאה ראשונית לטעינת טבלה
     refresh_items_table()
 
 
@@ -530,37 +851,57 @@ def open_search_item_window(tree_frame):
     for widget in tree_frame.winfo_children():
         widget.destroy()
 
-    def search_item():
+
+    def search_items(event=None):
+        branch = combo_branch.get()  # הסניף הנבחר
         sku = entry_sku.get().strip()
-        if not sku:
-            messagebox.showerror("שגיאה", "אנא הזן SKU לחיפוש")
-            return
+        name = entry_name.get().strip()
+        category = entry_category.get().strip()
+
+        query = """
+            SELECT inventory.sku, inventory.item_name, inventory.category, inventory.quantity, 
+                   inventory.price, inventory.color, inventory.size, inventory.shelf_row, inventory.shelf_column, 
+                   branches.branch_id, branches.branch_name, branches.branch_address, inventory.image_path
+            FROM inventory
+            INNER JOIN branches ON inventory.branch_id = branches.branch_id
+            WHERE 1=1
+        """
+        params = []
+
+        if sku:
+            query += " AND inventory.sku LIKE %s"
+            params.append(f"%{sku}%")
+        if name:
+            query += " AND inventory.item_name LIKE %s"
+            params.append(f"%{name}%")
+        if category:
+            query += " AND inventory.category LIKE %s"
+            params.append(f"%{category}%")
+        if branch and branch != "בחר סניף":
+            query += " AND branches.branch_address LIKE %s"
+            params.append(f"%{branch}%")
 
         try:
             connection = connect_to_database()
             cursor = connection.cursor()
+            cursor.execute(query, tuple(params))
+            results = cursor.fetchall()
 
-            cursor.execute("""
-                SELECT inventory.sku, inventory.item_name, inventory.category, inventory.quantity, 
-                       inventory.price, inventory.color, inventory.size, inventory.shelf_row, inventory.shelf_column, 
-                       branches.branch_id, branches.branch_name, branches.branch_address, inventory.image_path
-                FROM inventory
-                INNER JOIN branches ON inventory.branch_id = branches.branch_id 
-                WHERE inventory.sku = %s
-            """, (sku,))
-            result = cursor.fetchone()
-
-            tree.delete(*tree.get_children())  # ניקוי התצוגה הקודמת
-
-            if result:
-                tree.insert("", tk.END, values=result[:-1])  # הכנסת הנתונים ללא נתיב התמונה
-                display_image(result[-1])  # הצגת התמונה אם קיימת
+            tree.delete(*tree.get_children())
+            if results:
+                for index, item in enumerate(results):
+                    tag = 'evenrow' if index % 2 == 0 else 'oddrow'
+                    tree.insert("", tk.END, values=item[:-1], tags=(tag,))
+                status_label.config(text=f"נמצאו {len(results)} תוצאות")
+                first_image = results[0][-1]
+                display_image(first_image)
             else:
-                messagebox.showinfo("תוצאה", "לא נמצא פריט עם ה-SKU שסיפקת")
-                image_label.config(image="")  # הסרת התמונה אם לא נמצא
+                status_label.config(text="לא נמצאו תוצאות")
+                image_label.config(image="")
+                image_label.image = None
 
         except mysql.connector.Error as e:
-            messagebox.showerror("שגיאה", f"שגיאה בעת חיפוש הפריט: {e}")
+            messagebox.showerror("שגיאה", f"שגיאה בחיפוש: {e}")
         finally:
             if connection:
                 connection.close()
@@ -568,46 +909,173 @@ def open_search_item_window(tree_frame):
     def display_image(image_file):
         try:
             if image_file and os.path.exists(image_file):
-                image = Image.open(image_file)
-                image = image.resize((150, 150), Image.Resampling.LANCZOS)
-                photo = ImageTk.PhotoImage(image)
+                img = Image.open(image_file)
+                img = img.resize((150, 150), Image.Resampling.LANCZOS)
+                mask = Image.new('L', img.size, 0)
+                draw = ImageDraw.Draw(mask)
+                draw.ellipse((0, 0) + img.size, fill=255)
+                img.putalpha(mask)
+                photo = ImageTk.PhotoImage(img)
 
                 image_label.config(image=photo)
                 image_label.image = photo
             else:
-                image_label.config(image="")  # אם אין תמונה, לא להציג כלום
+                image_label.config(image="")
                 image_label.image = None
         except Exception as e:
             messagebox.showerror("שגיאה", f"לא ניתן לטעון את התמונה: {e}")
 
-    # יצירת מסגרת לחיפוש
-    form_frame = ttk.LabelFrame(tree_frame, text="חיפוש פריט לפי SKU")
-    form_frame.pack(pady=20, padx=20, fill="x")
+    def show_item_details(event):
+        selected_item = tree.focus()
+        if selected_item:
+            values = tree.item(selected_item, 'values')
+            if not values:
+                return
 
-    ttk.Label(form_frame, text="הזן SKU:").grid(row=0, column=0, padx=5, pady=5)
-    entry_sku = ttk.Entry(form_frame)
-    entry_sku.grid(row=0, column=1, padx=5, pady=5)
+            top = tk.Toplevel(tree_frame)
+            top.title("פרטי פריט")
+            top.geometry("400x500")
+            top.configure(bg="white")
 
-    ttk.Button(form_frame, text="חפש", command=search_item).grid(row=0, column=2, padx=5, pady=5)
+            # שליפת תמונה
+            sku = values[0]
+            try:
+                connection = connect_to_database()
+                cursor = connection.cursor()
+                cursor.execute("""
+                    SELECT image_path FROM inventory WHERE sku = %s
+                """, (sku,))
+                result = cursor.fetchone()
+                image_file = result[0] if result else None
+            except:
+                image_file = None
+            finally:
+                if connection:
+                    connection.close()
 
-    # יצירת עץ להצגת הנתונים כולל השדות החדשים
-    columns = (
-    "SKU", "שם פריט", "קטגוריה", "כמות", "מחיר", "צבע", "מידה", "שורת מדף", "עמודת מדף", "ID סניף", "שם סניף",
-    "כתובת סניף")
+            if image_file and os.path.exists(image_file):
+                img = Image.open(image_file)
+                img = img.resize((250, 250), Image.Resampling.LANCZOS)
+                photo = ImageTk.PhotoImage(img)
+                img_label = tk.Label(top, image=photo, bg="white")
+                img_label.image = photo
+                img_label.pack(pady=10)
+            else:
+                tk.Label(top, text="אין תמונה", bg="white").pack(pady=10)
 
-    tree = ttk.Treeview(tree_frame, columns=columns, show="headings")
+            # פרטי הפריט
+            details = [
+                f"SKU: {values[0]}",
+                f"שם: {values[1]}",
+                f"קטגוריה: {values[2]}",
+                f"כמות: {values[3]}",
+                f"מחיר: {values[4]} ₪",
+                f"צבע: {values[5]}",
+                f"מידה: {values[6]}",
+                f"מיקום: שורה {values[7]}, עמודה {values[8]}",
+                f"סניף: {values[10]}",
+                f"כתובת: {values[11]}"
+            ]
+
+            for d in details:
+                tk.Label(top, text=d, bg="white", font=("Arial", 11)).pack(pady=2)
+    def on_tree_select(event):
+        selected_item = tree.focus()
+        if selected_item:
+            values = tree.item(selected_item, 'values')
+            if values:
+                sku = values[0]
+                try:
+                    connection = connect_to_database()
+                    cursor = connection.cursor()
+                    cursor.execute("SELECT image_path FROM inventory WHERE sku = %s", (sku,))
+                    result = cursor.fetchone()
+                    if result:
+                        display_image(result[0])
+                except:
+                    pass
+                finally:
+                    if connection:
+                        connection.close()
+
+    # ----- עיצוב המסכים -----
+
+    form_frame = tk.Frame(tree_frame, bg="#f8f9fa", bd=2, relief="groove")
+    form_frame.pack(pady=15, padx=20, fill="x")
+
+    def create_entry(parent, label_text, row, col):
+        label = tk.Label(parent, text=label_text, font=("Arial", 16, "bold"), bg="#f8f9fa")
+        label.grid(row=row, column=col, padx=5, pady=5)
+        entry = tk.Entry(parent, bd=2, relief="groove", font=("Arial", 16))
+        entry.grid(row=row, column=col+1, padx=5, pady=5)
+        return entry
+
+    entry_sku = create_entry(form_frame, "SKU:", 0, 2)
+    entry_name = create_entry(form_frame, "שם פריט:", 0, 4)
+    entry_category = create_entry(form_frame, "קטגוריה:", 0, 6)
+    # ComboBox for Branch selection
+    label_branch = tk.Label(form_frame, text="בחר סניף:", font=("Arial", 16, "bold"), bg="#f8f9fa")
+    label_branch.grid(row=0, column=0, padx=5, pady=5)
+    combo_branch = ttk.Combobox(form_frame, values=["בחר סניף"], state="readonly", font=("Arial", 16))
+    combo_branch.grid(row=0, column=1, padx=5, pady=5)
+
+    # שליפת כל הסניפים מהמאגר
+    try:
+        connection = connect_to_database()
+        cursor = connection.cursor()
+        cursor.execute("SELECT branch_address FROM branches")
+        branches = cursor.fetchall()
+        for branch in branches:
+            combo_branch['values'] += (branch[0],)
+    except mysql.connector.Error as e:
+        messagebox.showerror("שגיאה", f"שגיאה בהבאת סניפים: {e}")
+    finally:
+        if connection:
+            connection.close()
+    # חיפוש בזמן אמת
+    combo_branch.bind("<<ComboboxSelected>>", search_items)  # חיפוש עדכון לאחר בחירת סניף
+    entry_sku.bind("<KeyRelease>", search_items)
+    entry_name.bind("<KeyRelease>", search_items)
+    entry_category.bind("<KeyRelease>", search_items)
+
+    search_button = tk.Button(form_frame, text="🔍 חפש", font=("Arial", 16), bg="#007bff", fg="white",
+                              relief="raised", bd=2, command=search_items)
+    search_button.grid(row=0, column=8, padx=10, pady=5)
+
+    # ----- עץ -----
+
+    columns = ("SKU", "שם פריט", "קטגוריה", "כמות", "מחיר", "צבע", "מידה", "שורת מדף", "עמודת מדף", "ID סניף", "שם סניף", "כתובת סניף")
+    tree = ttk.Treeview(tree_frame, columns=columns, show="headings", selectmode="browse")
+
+    style = ttk.Style()
+    style.configure("Treeview", font=("Arial", 16), rowheight=30)
+    style.map('Treeview', background=[('selected', '#007bff')])
+    style.configure("Treeview.Heading", font=("Arial", 16, "bold"))
 
     for col in columns:
         tree.heading(col, text=col)
         tree.column(col, anchor="center", width=100)
 
-    tree.pack(pady=20, fill="both", expand=True)
+    tree.tag_configure('oddrow', background="white")
+    tree.tag_configure('evenrow', background="#e9f2fb")
 
-    # הצגת תמונה של הפריט
-    image_label = ttk.Label(tree_frame)
+    tree.pack(pady=10, padx=10, fill="both", expand=True)
+
+    # בחירת שורה - להציג תמונה
+    tree.bind("<<TreeviewSelect>>", on_tree_select)
+
+    # דאבל קליק - הצגת פרטים מלאים
+    tree.bind("<Double-1>", show_item_details)
+
+    # ----- תמונה -----
+
+    image_label = tk.Label(tree_frame, bg="white", bd=2, relief="groove")
     image_label.pack(pady=10)
 
+    # ----- סטטוס -----
 
+    status_label = tk.Label(tree_frame, text="", font=("Arial", 16, "italic"), fg="gray")
+    status_label.pack(pady=5)
 def open_purchase_window(tree_frame):
     for widget in tree_frame.winfo_children():
         widget.destroy()
@@ -859,228 +1327,6 @@ def open_purchase_window(tree_frame):
     total_label.pack(pady=5)
 
 
-def open_report_window(tree_frame):
-    for widget in tree_frame.winfo_children():
-        widget.destroy()
-
-    def generate_report():
-        report_type = report_combobox.get()
-        if not report_type:
-            messagebox.showerror("שגיאה", "אנא בחר סוג דוח")
-            return
-
-        try:
-            connection = connect_to_database()
-            cursor = connection.cursor()
-
-            if report_type == "דוח מלאי":
-                cursor.execute("""
-                    SELECT inventory.sku, inventory.item_name, inventory.category, inventory.quantity, inventory.price, inventory.color, 
-                           inventory.size, inventory.shelf_row, inventory.shelf_column, branches.branch_name, branches.branch_address, 
-                           inventory.last_updated 
-                    FROM inventory_system.inventory 
-                    INNER JOIN inventory_system.branches ON inventory.branch_id = branches.branch_id
-                """)
-                rows = cursor.fetchall()
-                df = pd.DataFrame(rows, columns=[
-                    "SKU", "item_name", "category", "quantity", "price", "color", "size",
-                    "shelf_row", "shelf_column", "branch_name", "branch_address", "last_updated"
-                ])
-
-                global report_file_name
-                report_file_name = "דוח_מלאי.xlsx"
-
-                # יצירת קובץ Excel עם גרף
-                # יצירת קובץ Excel עם גרף
-                with pd.ExcelWriter(report_file_name, engine='xlsxwriter', datetime_format='yyyy-mm-dd') as writer:
-                    df.to_excel(writer, index=False, sheet_name='מלאי')
-                    workbook = writer.book
-                    worksheet = writer.sheets['מלאי']
-
-                    # הפיכת עמודת תאריך לעמודת טקסט/תאריך
-                    df['last_updated'] = pd.to_datetime(df['last_updated'])
-
-                    # הוספת גרף מסוג עמודות – תאריך מול כמות
-                    chart = workbook.add_chart({'type': 'column'})
-                    chart.add_series({
-                        'name': 'כמות לפי תאריך',
-                        'categories': f'=מלאי!L$2:$L${len(df) + 1}',  # last_updated
-                        'values': f'=מלאי!$D$2:$D${len(df) + 1}',  # quantity
-                    })
-                    chart.set_title({'name': 'גרף כמות לפי תאריך עדכון'})
-                    chart.set_x_axis({'name': 'תאריך עדכון'})
-                    chart.set_y_axis({'name': 'כמות'})
-
-                    worksheet.insert_chart('N2', chart)
-
-
-            elif report_type == "דוח רכישות":
-                cursor.execute("""
-                    SELECT p.customer_id, p.customer_name, c.phone_number, c.email, p.item_name, p.quantity, 
-                           p.total_price, p.purchase_date, p.color, p.size, p.branch_name 
-                    FROM inventory_system.Purchases p 
-                    INNER JOIN inventory_system.Customers c ON p.customer_name = c.customer_name
-                """)
-                rows = cursor.fetchall()
-                df = pd.DataFrame(rows, columns=[
-                    "Customer ID", "Customer Name", "Phone Number", "Email", "Item Name",
-                    "Quantity", "Total Price", "Purchase Date", "Color", "Size", "Branch Name"
-                ])
-
-                report_file_name = "דוח_רכישות.xlsx"
-                # המרת תאריך
-                df['Purchase Date'] = pd.to_datetime(df['Purchase Date'])
-
-                # שמירת דוח + גרף
-                with pd.ExcelWriter(report_file_name, engine='xlsxwriter', datetime_format='yyyy-mm-dd') as writer:
-                    df.to_excel(writer, index=False, sheet_name='רכישות')
-                    workbook = writer.book
-                    worksheet = writer.sheets['רכישות']
-
-                    # גרף עמודות לפי תאריך רכישה מול כמות
-                    chart = workbook.add_chart({'type': 'column'})
-                    chart.add_series({
-                        'name': 'כמות רכישות לפי תאריך',
-                        'categories': f'=רכישות!H$2:H${len(df) + 1}',  # Purchase Date
-                        'values': f'=רכישות!F$2:F${len(df) + 1}',  # Quantity
-                    })
-
-                    chart.set_title({'name': 'כמות רכישות לפי תאריך'})
-                    chart.set_x_axis({'name': 'תאריך רכישה'})
-                    chart.set_y_axis({'name': 'כמות'})
-
-                    worksheet.insert_chart('L2', chart)
-
-            messagebox.showinfo("הצלחה", f"הדוח נוצר ונשמר כ-{report_file_name}")
-            show_report_Button.config(state=tk.NORMAL)
-
-        except mysql.connector.Error as e:
-            messagebox.showerror("שגיאה", f"שגיאה בעת יצירת הדוח: {e}")
-        finally:
-            if connection:
-                connection.close()
-
-    def show_report():
-        if report_file_name and os.path.exists(report_file_name):
-            os.system(f'open "{report_file_name}"' if os.name == "posix" else f'start {report_file_name}')
-        else:
-            messagebox.showerror("שגיאה", "הדוח הזה לא נמצא")
-
-    report_window_frame = tk.LabelFrame(tree_frame, text="בחר סוג דוח")
-    report_window_frame.pack(padx=10, pady=10)
-
-    ttk.Label(report_window_frame, text="סוג דוח:").grid(row=0, column=0, padx=5, pady=5)
-    report_combobox = ttk.Combobox(report_window_frame, values=["דוח מלאי", "דוח רכישות"], state="readonly")
-    report_combobox.grid(row=0, column=1, padx=5, pady=5)
-
-    ttk.Button(report_window_frame, text="צור דוח", command=generate_report).grid(row=1, column=0, columnspan=2, pady=10)
-
-    show_report_Button = ttk.Button(tree_frame, text="הצג דוח", command=show_report, state=tk.DISABLED)
-    show_report_Button.pack(pady=5)
-
-def open_alerts_window(tree_frame, alerts_label, main_window):
-    for widget in tree_frame.winfo_children():
-        widget.destroy()
-
-        # ראש עמודת ההתראות + כפתור עדכון
-    top_frame = tk.Frame(tree_frame)
-    top_frame.pack(fill="x", pady=(0, 10))
-
-    last_alert_count = {"count": 0}  # עוקב אחרי מספר ההתראות הקודם
-
-    alert_frames = {}  # מיפוי בין סניף למסגרת התצוגה שלו
-    alert_trees = {}   # מיפוי בין סניף ל-TreeView שלו
-
-    ttk.Button(top_frame, text="עדכן עכשיו", command=lambda: open_update_item_window(tree_frame)).pack(side="right",
-                                                                                                       padx=10)
-    ttk.Button(top_frame, text="רענון", command=lambda: refresh_alerts).pack(side="right",
-                                                                                                       padx=10)
-    def refresh_alerts():
-        # ניקוי כל מסגרות הסניפים
-        for frame in alert_frames.values():
-            frame.destroy()
-        alert_frames.clear()
-        alert_trees.clear()
-
-        conn = connect_to_database()
-        cursor = conn.cursor()
-
-        #עדכון אוטומטי של סטטוס זמינות לפי הכמות
-        cursor.execute("""
-        UPDATE inventory
-        SET is_active = FALSE
-        WHERE quantity = 0 AND is_active = TRUE
-        """)
-        cursor.execute("""
-        UPDATE inventory
-        SET is_active = TRUE
-        WHERE quantity > 0 AND is_active = FALSE
-        """)
-        conn.commit()
-
-        #שליפת פריטים עם כמות מתחת ל- 10
-        cursor.execute("""
-                SELECT i.sku, i.branch_id, b.branch_name, b.branch_address, 
-                       i.item_name, i.quantity, i.last_updated
-                FROM inventory i
-                JOIN branches b ON i.branch_id = b.branch_id
-                WHERE i.quantity < 10
-                ORDER BY i.branch_id
-            """)
-        alerts = cursor.fetchall()
-        conn.close()
-
-        branch_alerts = {}
-        for sku, branch_id, branch_name, branch_address, item_name, quantity, last_updated in alerts:
-            if branch_id not in branch_alerts:
-                branch_alerts[branch_id] = {
-                    "name": branch_name,
-                    "address": branch_address,
-                    "items": []
-                }
-            branch_alerts[branch_id]["items"].append((sku, item_name, quantity, last_updated))
-
-        total_count = 0
-        for i, (branch_id, data) in enumerate(branch_alerts.items()):
-            name = data["name"]
-            address = data["address"]
-            items = data["items"]
-
-            # כותרת עם מספר סניף + שם + כתובת
-            branch_frame = ttk.LabelFrame(
-                tree_frame,
-                text=f"סניף מספר {branch_id} - {name} ({address})",
-                padding=10
-            )
-            branch_frame.pack(fill="both", expand=True, pady=5)
-            alert_frames[branch_id] = branch_frame
-
-            tree = ttk.Treeview(branch_frame, columns=("sku", "item", "quantity", "last_updated"), show="headings")
-            tree.heading("sku", text="sku")
-            tree.heading("item", text="שם פריט")
-            tree.heading("quantity", text="כמות נוכחית")
-            tree.heading("last_updated", text="עודכן לאחרונה")
-            tree.pack(fill="both", expand=True)
-
-            for item in items:
-                tree.insert("", "end", values=item)
-
-            alert_trees[branch_id] = tree
-            total_count += len(items)
-
-        # הצגת פופ-אפ אם נוספו התראות חדשות
-        if total_count > last_alert_count["count"]:
-            messagebox.showinfo("התראות חדשות", f"⚠️ נוספו {total_count - last_alert_count['count']} התראות חדשות!")
-
-        last_alert_count["count"] = total_count
-
-        # עדכון תווית
-        if total_count > 0:
-            alerts_label.config(text=f"🔴 {total_count} התראות", fg="red")
-        else:
-            alerts_label.config(text="✔ אין התראות", fg="green")
-
-    refresh_alerts()
 def open_finance_window(tree_frame):
     for widget in tree_frame.winfo_children():
         widget.destroy()
@@ -1118,13 +1364,3 @@ def open_finance_window(tree_frame):
         create_branch_finance_display(right_frame, branches[1][0], branches[1][1])
 
     connection.close()
-
-
-
-
-
-
-def clear_inputs():
-    for entry in entries:
-        entry.delete(0, tk.END)
-entries = []

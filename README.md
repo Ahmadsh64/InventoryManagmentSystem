@@ -4,3 +4,10 @@ InventoryManagmentSystem
 2. Use username 'root' and password '12345'.
 3. The database name is 'inventory_system'.
 
+
+
+
+
+
+
+
