@@ -376,16 +376,16 @@ def open_add_item_window(tree_frame):
     # שדות ומילון תואם
     labels = {
         "SKU": "SKU 🔎",
-        "name": "שם פריט ✏️",
-        "category": "קטגוריה 🏷️",
-        "quantity": "כמות 📦",
-        "price": "מחיר 💲",
-        "branch": "סניף 🏬",
-        "color": "צבע 🎨",
-        "size": "מידה 📏",
-        "shelf_row": "שורה במדף 🛒",
-        "shelf_column": "טור במדף 🛒",
-        "val" : "נתיב תמונה 📷"
+        "name": "item_name ✏️",
+        "category": "category 🏷️",
+        "quantity": "quantity 📦",
+        "price": "price 💲",
+        "branch": "branch 🏬",
+        "color": "color 🎨",
+        "size": "size 📏",
+        "shelf_row": "shelf_row 🛒",
+        "shelf_column": "shelf_column 🛒",
+        "val" : "image_path 📷"
     }
 
     entries = {}
@@ -411,7 +411,7 @@ def open_add_item_window(tree_frame):
     # כפתור בחירת תמונה + תצוגה
     # כותרת
     tk.Label(
-        add_frame, text="🆕 הוספת פריט חדש", font = ("Segoe UI", 25, "bold"),bg = "#ffffff",
+        add_frame, text="🆕 Add New Item", font = ("Segoe UI", 25, "bold"),bg = "#ffffff",
         fg = "#2f3640").grid(row=0, column=2, columnspan=4, pady=5, sticky="e")
 
     # --- תצוגת מפת מחסן ---
@@ -420,7 +420,7 @@ def open_add_item_window(tree_frame):
 
     # כותרת מפת המחסן
     tk.Label(
-        add_frame, text="📦 מפת המחסן", font=("Segoe UI", 25, "bold"),
+        add_frame, text="📦 Warehouse Map", font=("Segoe UI", 25, "bold"),
         bg="#ffffff", fg="#2f3640"
     ).grid(row=1, column=8, columnspan=4, pady=5, sticky="e")
 
@@ -433,7 +433,7 @@ def open_add_item_window(tree_frame):
     image_label.grid(row=2, column=2, rowspan=4, padx=10, pady=10)
 
     # כפתורים
-    tk.Button(add_frame, text="בחר תמונה 📷", command=select_image,
+    tk.Button(add_frame, text="Select Img 📷", command=select_image,
               bg="#3498db", fg="white", font=("Segoe UI", 16), relief="flat") \
         .grid(row=11, column=2, padx=10, pady=10)
 
@@ -444,12 +444,12 @@ def open_add_item_window(tree_frame):
 
     # כפתור רענון מפת המחסן
     btn_refresh = tk.Button(
-        add_frame, text="🔄 טען מדפים",
+        add_frame, text="🔄 Load Shelves",
         bg="#3498db", fg="white", font=("Segoe UI", 16), relief="flat",
         command= refresh_map)
     btn_refresh.grid(row=12, column=3, padx=10, pady=10)
 
-    tk.Button(add_frame, text="נקה 🧹", command=clear_inputs,
+    tk.Button(add_frame, text="Clear 🧹", command=clear_inputs,
               bg="#e67e22", fg="white", font=("Segoe UI", 16), relief="flat") \
         .grid(row=12, column=4, padx=10, pady=10)
 
@@ -647,8 +647,8 @@ def open_update_item_window(tree_frame):
              bg="#ffffff", fg="#2f3640").grid(row=0, column=8, columnspan=4, pady=5)
 
     # שדות טקסט
-    labels = ["SKU 🔎", "שם פריט ✏️", "קטגוריה 🏷️", "כמות 📦", "הוספת כמות ➕",
-              "מחיר 💲", "סניף 🏬", "צבע 🎨", "מידה 📏", "שורה במדף 🛒", "טור במדף 🛒", "נתיב תמונה 📷"]
+    labels = ["SKU 🔎", "item_name ✏️", "category 🏷️", "quantity 📦", "add_quantity ➕",
+              "price 💲", "branch 🏬", "color 🎨", "size 📏", "shelf_row 🛒", "shelf_column 🛒", "image_path 📷"]
     entries = []
     for idx, text in enumerate(labels):
         tk.Label(update_item_frame, text=text, bg="#ffffff", anchor="w", font=("Segoe UI", 16)) \
@@ -670,19 +670,19 @@ def open_update_item_window(tree_frame):
     image_label.grid(row=1, column=2, rowspan=8, padx=30, pady=30)
 
     # כפתורים
-    tk.Button(update_item_frame, text="בחר תמונה 📷", command=select_image,
+    tk.Button(update_item_frame, text="Load_img 📷", command=select_image,
               bg="#3498db", fg="white", font=("Segoe UI", 16), relief="flat") \
         .grid(row=12, column=2, padx=10, pady=10)
 
-    tk.Button(update_item_frame, text="טען פריט 🔎", command=load_item_details,
+    tk.Button(update_item_frame, text="Load item 🔎", command=load_item_details,
               bg="#2ecc71", fg="white", font=("Segoe UI", 16), relief="flat") \
         .grid(row=1, column=2, padx=10, pady=10)
 
-    tk.Button(update_item_frame, text="עדכן פריט ✔️", command=update_item,
+    tk.Button(update_item_frame, text="Update ✔️", command=update_item,
               bg="#27ae60", fg="white", font=("Segoe UI", 16), relief="flat") \
         .grid(row=12, column=3, padx=10, pady=10)
 
-    tk.Button(update_item_frame, text="נקה 🧹", command=clear_inputs,
+    tk.Button(update_item_frame, text="clear 🧹", command=clear_inputs,
               bg="#e67e22", fg="white", font=("Segoe UI", 16), relief="flat") \
         .grid(row=12, column=4, padx=10, pady=10)
 
