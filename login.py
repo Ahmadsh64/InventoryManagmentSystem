@@ -118,4 +118,3 @@ class LoginApp:
                 conn.close()
 
         ctk.CTkButton(register_win, text="צור חשבון", command=submit).pack(pady=20)
-
