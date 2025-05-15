@@ -1,6 +1,7 @@
 import os
 import shutil
 from datetime import datetime
+
 import mysql.connector
 import pandas as pd
 from tkinter import ttk, messagebox, filedialog
@@ -8,6 +9,9 @@ from database import connect_to_database
 from PIL import Image, ImageTk, ImageDraw
 import tkinter as tk
 from tkinter import ttk, messagebox
+from scanQR import scan_qr_code
+
+
 
 # פונקציה לעדכון מפת המחסן לפי סניף
 def update_warehouse_map(parent_frame, branch_id, select_shelf, item_sku=None):
@@ -254,6 +258,12 @@ def open_add_item_window(tree_frame):
         entries["shelf_column"].delete(0, tk.END)
         entries["shelf_column"].insert(0, str(col))
 
+    def scan_and_fill_sku():
+        scanned = scan_qr_code()
+        if scanned:
+            entries["SKU"].delete(0, tk.END)
+            entries["SKU"].insert(0, scanned)
+
     def refresh_map():
         branch_name = entries["branch"].get()
         branch_id = branch_dict.get(branch_name, -1)
@@ -352,6 +362,7 @@ def open_add_item_window(tree_frame):
         finally:
             conn.close()
 
+
         # תעודת קבלה מעוצבת
         receipt = tk.Toplevel()
         receipt.title("🧾 תעודת קבלת סחורה")
@@ -385,15 +396,15 @@ def open_add_item_window(tree_frame):
         "size": "size 📏",
         "shelf_row": "shelf_row 🛒",
         "shelf_column": "shelf_column 🛒",
-        "val" : "image_path 📷"
+        "val": "image_path 📷"
     }
+
 
     entries = {}
 
-
     add_frame = tk.Frame(tree_frame, bg="#ffffff", width=1000, height=1000)
     add_frame.pack(fill="both", expand=True, padx=2, pady=2)
-    add_frame.pack_propagate(0)  # חשוב כדי למנוע שינוי אוטומטי של הגודל
+    add_frame.pack_propagate(0)
 
     for idx, (key, label_text) in enumerate(labels.items()):
         tk.Label(add_frame, text=label_text, bg="#ffffff", anchor="w", font=("Segoe UI", 16)) \
@@ -408,11 +419,16 @@ def open_add_item_window(tree_frame):
         entry.grid(row=idx + 1, column=1, padx=15, pady=15, sticky="w")
         entries[key] = entry
 
+        # הוספת כפתור סריקת ברקוד ליד שדה ה-SKU
+        if key == "SKU":
+            btn_scan = tk.Button(add_frame, text="📷QR Scanner", command=scan_and_fill_sku,
+                                 bg="#9b59b6", fg="white", font=("Segoe UI", 12), relief="flat")
+            btn_scan.grid(row=idx + 1, column=2, padx=5, pady=5, sticky="w")
     # כפתור בחירת תמונה + תצוגה
     # כותרת
     tk.Label(
-        add_frame, text="🆕 Add New Item", font = ("Segoe UI", 25, "bold"),bg = "#ffffff",
-        fg = "#2f3640").grid(row=0, column=2, columnspan=4, pady=5, sticky="e")
+        add_frame, text="🆕 Add New Item", font=("Segoe UI", 25, "bold"), bg="#ffffff",
+        fg="#2f3640").grid(row=0, column=2, columnspan=4, pady=5, sticky="e")
 
     # --- תצוגת מפת מחסן ---
     warehouse_frame = tk.Frame(add_frame, bg="#ffffff")
@@ -428,7 +444,6 @@ def open_add_item_window(tree_frame):
     image_entry = ttk.Entry(add_frame, textvariable=image_path_var, width=30)
     image_entry.grid(row=11, column=1, padx=10, pady=10, sticky="w")
 
-
     image_label = tk.Label(add_frame, bg="#ffffff")
     image_label.grid(row=2, column=2, rowspan=4, padx=10, pady=10)
 
@@ -436,7 +451,6 @@ def open_add_item_window(tree_frame):
     tk.Button(add_frame, text="Select Img 📷", command=select_image,
               bg="#3498db", fg="white", font=("Segoe UI", 16), relief="flat") \
         .grid(row=11, column=2, padx=10, pady=10)
-
 
     tk.Button(add_frame, text="add ✔️", command=add_item,
               bg="#27ae60", fg="white", font=("Segoe UI", 16), relief="flat") \
@@ -446,7 +460,7 @@ def open_add_item_window(tree_frame):
     btn_refresh = tk.Button(
         add_frame, text="🔄 Load Shelves",
         bg="#3498db", fg="white", font=("Segoe UI", 16), relief="flat",
-        command= refresh_map)
+        command=refresh_map)
     btn_refresh.grid(row=12, column=3, padx=10, pady=10)
 
     tk.Button(add_frame, text="Clear 🧹", command=clear_inputs,
@@ -456,6 +470,11 @@ def open_add_item_window(tree_frame):
 def open_update_item_window(tree_frame):
     for widget in tree_frame.winfo_children():
         widget.destroy()
+    def scan_and_fill_sku():
+        scanned = scan_qr_code()
+        if scanned:
+            entry_sku.delete(0, tk.END)
+            entry_sku.insert(0, scanned)
 
     def update_item():
         name = entry_name.get()
@@ -669,20 +688,23 @@ def open_update_item_window(tree_frame):
     image_label = tk.Label(update_item_frame)
     image_label.grid(row=1, column=2, rowspan=8, padx=30, pady=30)
 
+    (tk.Button(update_item_frame, text="📷QR Scanner", command=scan_and_fill_sku,
+               bg="#2ecc71", fg="white", font=("Segoe UI", 16), relief="flat")\
+     .grid(row=1, column=2))
+    (tk.Button(update_item_frame, text="LoadItem🔎", command=load_item_details,
+              bg="#2ecc71", fg="white", font=("Segoe UI", 16), relief="flat") \
+     .grid(row=1, column=3, padx=10, pady=10))
+
     # כפתורים
-    tk.Button(update_item_frame, text="Load_img 📷", command=select_image,
+    tk.Button(update_item_frame, text="LoadImg 📷", command=select_image,
               bg="#3498db", fg="white", font=("Segoe UI", 16), relief="flat") \
         .grid(row=12, column=2, padx=10, pady=10)
 
-    tk.Button(update_item_frame, text="Load item 🔎", command=load_item_details,
-              bg="#2ecc71", fg="white", font=("Segoe UI", 16), relief="flat") \
-        .grid(row=1, column=2, padx=10, pady=10)
-
-    tk.Button(update_item_frame, text="Update ✔️", command=update_item,
+    tk.Button(update_item_frame, text="Update_item✔️", command=update_item,
               bg="#27ae60", fg="white", font=("Segoe UI", 16), relief="flat") \
         .grid(row=12, column=3, padx=10, pady=10)
 
-    tk.Button(update_item_frame, text="clear 🧹", command=clear_inputs,
+    tk.Button(update_item_frame, text="Clear🧹", command=clear_inputs,
               bg="#e67e22", fg="white", font=("Segoe UI", 16), relief="flat") \
         .grid(row=12, column=4, padx=10, pady=10)
 
@@ -758,6 +780,12 @@ def open_delete_item_window(tree_frame):
             if connection:
                 connection.close()
 
+    def scan_and_fill_sku():
+        scanned = scan_qr_code()
+        if scanned:
+            entry_sku.delete(0, tk.END)
+            entry_sku.insert(0, scanned)
+
     def restore_selected_item():
         selected_item = tree.focus()
         if not selected_item:
@@ -790,12 +818,16 @@ def open_delete_item_window(tree_frame):
     entry_sku = ttk.Entry(delete_item_frame, font=("Segoe UI", 11), width=25)
     entry_sku.grid(row=0, column=1, padx=10, pady=8)
 
+    (tk.Button(delete_item_frame, text="📷QR Scanner", command=scan_and_fill_sku,
+               bg="#2ecc71", fg="white", font=("Segoe UI", 16), relief="flat") \
+     .grid(row=0, column=2))
+
     btn_hide = tk.Button(
         delete_item_frame, text="🚫 הסתר פריט", font=("Segoe UI", 12, "bold"),
         bg="#e74c3c", fg="white", activebackground="#c0392b",
         relief="flat", padx=15, pady=6, command=update_item_visibility
     )
-    btn_hide.grid(row=0, column=2, padx=10, pady=8)
+    btn_hide.grid(row=0, column=3, padx=10, pady=8)
 
     # כפתור החזרת פריט
     btn_restore = tk.Button(
@@ -803,7 +835,7 @@ def open_delete_item_window(tree_frame):
         bg="#2ecc71", fg="white", activebackground="#27ae60",
         relief="flat", padx=20, pady=8, command=restore_selected_item
     )
-    btn_restore.grid(row=0, column=3, padx=10, pady=8)
+    btn_restore.grid(row=0, column=4, padx=10, pady=8)
 
     # צ'קבוקס
     show_hidden_var = tk.BooleanVar()
@@ -811,7 +843,7 @@ def open_delete_item_window(tree_frame):
         delete_item_frame, text="הצג גם פריטים מוסתרים",
         variable=show_hidden_var, command=refresh_items_table
     )
-    show_hidden_checkbox.grid(row=0, column=4, padx=10, pady=8)
+    show_hidden_checkbox.grid(row=0, column=5, padx=10, pady=8)
 
     # ----- עץ -----
 
@@ -979,6 +1011,12 @@ def open_search_item_window(tree_frame):
 
             for d in details:
                 tk.Label(top, text=d, bg="white", font=("Arial", 11)).pack(pady=2)
+
+    def scan_and_fill_sku():
+        scanned = scan_qr_code()
+        if scanned:
+            entry_sku.delete(0, tk.END)
+            entry_sku.insert(0, scanned)
     def on_tree_select(event):
         selected_item = tree.focus()
         if selected_item:
@@ -1011,12 +1049,12 @@ def open_search_item_window(tree_frame):
         return entry
 
     entry_sku = create_entry(form_frame, "SKU:", 0, 2)
-    entry_name = create_entry(form_frame, "שם פריט:", 0, 4)
-    entry_category = create_entry(form_frame, "קטגוריה:", 0, 6)
+    entry_name = create_entry(form_frame, "ItemName:", 0, 4)
+    entry_category = create_entry(form_frame, "Category:", 0, 6)
     # ComboBox for Branch selection
-    label_branch = tk.Label(form_frame, text="בחר סניף:", font=("Arial", 16, "bold"), bg="#f8f9fa")
+    label_branch = tk.Label(form_frame, text="Select Branch:", font=("Arial", 16, "bold"), bg="#f8f9fa")
     label_branch.grid(row=0, column=0, padx=5, pady=5)
-    combo_branch = ttk.Combobox(form_frame, values=["בחר סניף"], state="readonly", font=("Arial", 16))
+    combo_branch = ttk.Combobox(form_frame, values=["Select Branch"], state="readonly", font=("Arial", 16))
     combo_branch.grid(row=0, column=1, padx=5, pady=5)
 
     # שליפת כל הסניפים מהמאגר
@@ -1038,9 +1076,13 @@ def open_search_item_window(tree_frame):
     entry_name.bind("<KeyRelease>", search_items)
     entry_category.bind("<KeyRelease>", search_items)
 
-    search_button = tk.Button(form_frame, text="🔍 חפש", font=("Arial", 16), bg="#007bff", fg="white",
+    search_button = tk.Button(form_frame, text="🔍Search", font=("Arial", 16), bg="#007bff", fg="white",
                               relief="raised", bd=2, command=search_items)
-    search_button.grid(row=0, column=8, padx=10, pady=5)
+    search_button.grid(row=1, column=4, padx=10, pady=5)
+
+    (tk.Button(form_frame, text="📷QR Scanner", command=scan_and_fill_sku,
+               bg="#2ecc71", fg="white", font=("Segoe UI", 16), relief="flat") \
+     .grid(row=1, column=3, padx=10, pady=5))
 
     # ----- עץ -----
 
@@ -1364,3 +1406,4 @@ def open_finance_window(tree_frame):
         create_branch_finance_display(right_frame, branches[1][0], branches[1][1])
 
     connection.close()
+

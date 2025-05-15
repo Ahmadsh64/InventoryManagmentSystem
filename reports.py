@@ -23,83 +23,180 @@ def open_report_window(tree_frame):
             connection = connect_to_database()
             cursor = connection.cursor()
 
+            global report_file_name
+
             if report_type == "דוח מלאי":
                 cursor.execute("""
-                    SELECT inventory.sku, inventory.item_name, inventory.category, inventory.quantity, inventory.price, inventory.color, 
-                           inventory.size, inventory.shelf_row, inventory.shelf_column, branches.branch_name, branches.branch_address, 
-                           inventory.last_updated 
-                    FROM inventory_system.inventory 
-                    INNER JOIN inventory_system.branches ON inventory.branch_id = branches.branch_id
+                    SELECT i.sku, i.item_name, i.category, i.quantity, i.price, i.color, i.size,
+                           i.shelf_row, i.shelf_column, b.branch_name, b.branch_address, i.last_updated
+                    FROM inventory i
+                    INNER JOIN branches b ON i.branch_id = b.branch_id
                 """)
                 rows = cursor.fetchall()
                 df = pd.DataFrame(rows, columns=[
-                    "SKU", "item_name", "category", "quantity", "price", "color", "size",
-                    "shelf_row", "shelf_column", "branch_name", "branch_address", "last_updated"
+                    "SKU", "Item Name", "Category", "Quantity", "Price", "Color", "Size",
+                    "Shelf Row", "Shelf Column", "Branch Name", "Branch Address", "Last Updated"
                 ])
-
-                global report_file_name
                 report_file_name = "דוח_מלאי.xlsx"
 
-                # יצירת קובץ Excel עם גרף
-                # יצירת קובץ Excel עם גרף
-                with pd.ExcelWriter(report_file_name, engine='xlsxwriter', datetime_format='yyyy-mm-dd') as writer:
-                    df.to_excel(writer, index=False, sheet_name='מלאי')
-                    workbook = writer.book
-                    worksheet = writer.sheets['מלאי']
 
-                    # הפיכת עמודת תאריך לעמודת טקסט/תאריך
-                    df['last_updated'] = pd.to_datetime(df['last_updated'])
+            elif report_type == "דוח מכירות (רכישות)":
 
-                    # הוספת גרף מסוג עמודות – תאריך מול כמות
-                    chart = workbook.add_chart({'type': 'column'})
-                    chart.add_series({
-                        'name': 'כמות לפי תאריך',
-                        'categories': f'=מלאי!L$2:$L${len(df) + 1}',  # last_updated
-                        'values': f'=מלאי!$D$2:$D${len(df) + 1}',  # quantity
-                    })
-                    chart.set_title({'name': 'גרף כמות לפי תאריך עדכון'})
-                    chart.set_x_axis({'name': 'תאריך עדכון'})
-                    chart.set_y_axis({'name': 'כמות'})
-
-                    worksheet.insert_chart('N2', chart)
-
-
-            elif report_type == "דוח רכישות":
                 cursor.execute("""
+
                     SELECT p.customer_id, p.customer_name, c.phone_number, c.email, p.item_name, p.quantity, 
+
                            p.total_price, p.purchase_date, p.color, p.size, p.branch_name 
+
                     FROM inventory_system.Purchases p 
+
                     INNER JOIN inventory_system.Customers c ON p.customer_name = c.customer_name
+
                 """)
+
                 rows = cursor.fetchall()
+
                 df = pd.DataFrame(rows, columns=[
+
                     "Customer ID", "Customer Name", "Phone Number", "Email", "Item Name",
+
                     "Quantity", "Total Price", "Purchase Date", "Color", "Size", "Branch Name"
+
                 ])
 
                 report_file_name = "דוח_רכישות.xlsx"
+
                 # המרת תאריך
+
                 df['Purchase Date'] = pd.to_datetime(df['Purchase Date'])
 
-                # שמירת דוח + גרף
-                with pd.ExcelWriter(report_file_name, engine='xlsxwriter', datetime_format='yyyy-mm-dd') as writer:
-                    df.to_excel(writer, index=False, sheet_name='רכישות')
-                    workbook = writer.book
-                    worksheet = writer.sheets['רכישות']
+            elif report_type == "דוח חוסרים במלאי":
+                cursor.execute("""
+                    SELECT i.sku, i.item_name, i.quantity, b.branch_name, i.category, i.last_updated
+                    FROM inventory i
+                    INNER JOIN branches b ON i.branch_id = b.branch_id
+                    WHERE i.quantity <= 100 
+                """)
+                rows = cursor.fetchall()
+                df = pd.DataFrame(rows, columns=[
+                    "SKU", "Item Name", "Quantity", "Branch Name", "Category", "Last Updated"
+                ])
+                report_file_name = "דוח_חוסרים.xlsx"
 
-                    # גרף עמודות לפי תאריך רכישה מול כמות
+            elif report_type == "דוח הזמנות":
+                cursor.execute("""
+                    SELECT e.expense_id, b.branch_name, e.sku, e.item_name,
+                           e.quantity_added, e.unit_price, e.total_cost, e.expense_date
+                    FROM expenses e
+                    INNER JOIN branches b ON e.branch_id = b.branch_id
+                """)
+                rows = cursor.fetchall()
+                df = pd.DataFrame(rows, columns=[
+                    "Expense ID", "Branch Name", "SKU", "Item Name",
+                    "Quantity Added", "Unit Price", "Total Cost", "Expense Date"
+                ])
+                df['Expense Date'] = pd.to_datetime(df['Expense Date'])
+                report_file_name = "דוח_הזמנות.xlsx"
+
+            elif report_type == "דוח שולי רווח":
+                # חישוב רווח = סך מכירות - סך עלות
+                cursor.execute("""
+                    SELECT p.item_name, SUM(p.total_price) AS total_sales
+                    FROM purchases p
+                    GROUP BY p.item_name
+                """)
+                sales = cursor.fetchall()
+                sales_df = pd.DataFrame(sales, columns=["Item Name", "Total Sales"])
+
+                cursor.execute("""
+                    SELECT e.item_name, SUM(e.total_cost) AS total_expense
+                    FROM expenses e
+                    GROUP BY e.item_name
+                """)
+                expenses = cursor.fetchall()
+                expenses_df = pd.DataFrame(expenses, columns=["Item Name", "Total Expense"])
+
+                df = pd.merge(sales_df, expenses_df, on="Item Name", how="left")
+                df['Profit'] = df['Total Sales'] - df['Total Expense']
+                df['Profit'] = df['Total Sales']
+                report_file_name = "דוח_שולי_רווח.xlsx"
+
+            elif report_type == "דוח מלאי חודשי":
+                # ניתוח חודשי: רכישות + הוספת מלאי
+                cursor.execute("""
+                    SELECT MONTH(p.purchase_date) AS month, p.item_name, SUM(p.quantity) AS total_purchases
+                    FROM purchases p
+                    GROUP BY month, p.item_name
+                """)
+                purchases = cursor.fetchall()
+                purchases_df = pd.DataFrame(purchases, columns=["Month", "Item Name", "Total Purchases"])
+
+                cursor.execute("""
+                    SELECT MONTH(e.expense_date) AS month, e.item_name, SUM(e.quantity_added) AS total_restocks
+                    FROM expenses e
+                    GROUP BY month, e.item_name
+                """)
+                restocks = cursor.fetchall()
+                restocks_df = pd.DataFrame(restocks, columns=["Month", "Item Name", "Total Restocks"])
+
+                df = pd.merge(purchases_df, restocks_df, on=["Month", "Item Name"], how="outer").fillna(0)
+                df['Balance'] = df['Total Restocks'] - df['Total Purchases']
+                df['Month'] = df['Month'].astype(int)
+                report_file_name = "דוח_מלאי_חודשי.xlsx"
+
+            elif report_type == "דוח עודפים במלאי":
+                # עודפים: מלאי ישן או בכמות גבוהה
+                cursor.execute("""
+                    SELECT i.sku, i.item_name, i.quantity, i.received, i.last_update, b.branch_name
+                    FROM inventory i
+                    INNER JOIN branches b ON i.branch_id = b.branch_id
+                    WHERE i.quantity > 50 OR DATEDIFF(NOW(), i.received) > 180
+                """)
+                rows = cursor.fetchall()
+                df = pd.DataFrame(rows, columns=[
+                    "SKU", "Item Name", "Quantity", "Received Date", "Last Update", "Branch Name"
+                ])
+                df['Received Date'] = pd.to_datetime(df['Received Date'])
+                report_file_name = "דוח_עודפים.xlsx"
+
+            else:
+                messagebox.showerror("שגיאה", "סוג דוח לא נתמך")
+                return
+
+            # שמירת קובץ Excel
+            with pd.ExcelWriter(report_file_name, engine='xlsxwriter', datetime_format='yyyy-mm-dd') as writer:
+                df.to_excel(writer, index=False, sheet_name='דוח')
+                workbook = writer.book
+                worksheet = writer.sheets['דוח']
+
+                # הוספת גרף אם מתאים
+                if report_type in ["דוח מלאי", "דוח מכירות (רכישות)", "דוח הזמנות", "דוח מלאי חודשי"]:
                     chart = workbook.add_chart({'type': 'column'})
-                    chart.add_series({
-                        'name': 'כמות רכישות לפי תאריך',
-                        'categories': f'=רכישות!H$2:H${len(df) + 1}',  # Purchase Date
-                        'values': f'=רכישות!F$2:F${len(df) + 1}',  # Quantity
-                    })
-
-                    chart.set_title({'name': 'כמות רכישות לפי תאריך'})
-                    chart.set_x_axis({'name': 'תאריך רכישה'})
-                    chart.set_y_axis({'name': 'כמות'})
-
-                    worksheet.insert_chart('L2', chart)
+                    if report_type == "דוח מלאי":
+                        chart.add_series({
+                            'name': 'כמות במלאי',
+                            'categories': f'=דוח!B2:B{len(df) + 1}',  # Item Name
+                            'values': f'=דוח!D2:D{len(df) + 1}',  # Quantity
+                        })
+                    elif report_type == "דוח מכירות (רכישות)":
+                        chart.add_series({
+                            'name': 'כמות רכישות',
+                            'categories': f'=דוח!E2:E{len(df) + 1}',  # Item Name
+                            'values': f'=דוח!F2:F{len(df) + 1}',  # Quantity
+                        })
+                    elif report_type == "דוח הזמנות":
+                        chart.add_series({
+                            'name': 'הזמנות לפי מוצר',
+                            'categories': f'=דוח!D2:D{len(df) + 1}',  # Item Name
+                            'values': f'=דוח!E2:E{len(df) + 1}',  # Quantity Added
+                        })
+                    elif report_type == "דוח מלאי חודשי":
+                        chart.add_series({
+                            'name': 'יתרת מלאי חודשית',
+                            'categories': f'=דוח!A2:A{len(df) + 1}',  # Month
+                            'values': f'=דוח!E2:E{len(df) + 1}',  # Balance
+                        })
+                    worksheet.insert_chart('M2', chart)
 
             messagebox.showinfo("הצלחה", f"הדוח נוצר ונשמר כ-{report_file_name}")
             show_report_Button.config(state=tk.NORMAL)
@@ -120,7 +217,10 @@ def open_report_window(tree_frame):
     report_window_frame.pack(padx=10, pady=10)
 
     ttk.Label(report_window_frame, text="סוג דוח:").grid(row=0, column=0, padx=5, pady=5)
-    report_combobox = ttk.Combobox(report_window_frame, values=["דוח מלאי", "דוח רכישות"], state="readonly")
+    report_combobox = ttk.Combobox(report_window_frame, values=[
+        "דוח מלאי", "דוח מכירות (רכישות)", "דוח חוסרים במלאי",
+        "דוח הזמנות", "דוח שולי רווח", "דוח מלאי חודשי", "דוח עודפים במלאי"
+    ], state="readonly")
     report_combobox.grid(row=0, column=1, padx=5, pady=5)
 
     ttk.Button(report_window_frame, text="צור דוח", command=generate_report).grid(row=1, column=0, columnspan=2, pady=10)
