@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html lang="he">
+<head>
+    <meta charset="UTF-8">
+    <title>התחברות</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <h1>התחברות למערכת</h1>
+        <form method="POST">
+            <label for="username">שם משתמש:</label>
+            <input type="text" id="username" name="username" required>
+            <label for="idnumber">תעודת זהות:</label>
+            <input type="text" id="idnumber" name="idnumber" required>
+            <button type="submit">התחבר</button>
+        </form>
+        <p class="message">{{ message }}</p>
+    </div>
+</body>
+</html>

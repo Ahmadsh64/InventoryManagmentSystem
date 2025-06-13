@@ -1,0 +1,54 @@
+
+<!DOCTYPE html>
+<html lang="he">
+<head>
+    <meta charset="UTF-8">
+    <title>עגלת הקניות</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <h1>עגלת הקניות שלך</h1>
+    {% if cart|length == 0 %}
+        <p>העגלה ריקה.</p>
+        <a href="{{ url_for('index') }}">חזרה לחיפוש פריטים</a>
+    {% else %}
+        <table>
+            <thead>
+                <tr>
+                    <th>שם פריט</th>
+                    <th>כמות</th>
+                    <th>מחיר ליחידה (₪)</th>
+                    <th>מחיר כולל (₪)</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for item in cart %}
+                    <tr>
+                        <td>{{ item.item_name }}</td>
+                        <td>{{ item.quantity }}</td>
+                        <td>{{ item.price }}</td>
+                        <td>{{ item.total_price }}</td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        <h3>סה"כ לתשלום: ₪{{ total }}</h3>
+        <button id="purchase-btn">סיים רכישה</button>
+        <br><br>
+        <a href="{{ url_for('index') }}">המשך קניות</a>
+    {% endif %}
+
+    <script>
+        document.getElementById('purchase-btn')?.addEventListener('click', async () => {
+            const res = await fetch('/purchase', { method: 'POST' });
+            const data = await res.json();
+            if (data.error) {
+                alert('שגיאה: ' + data.error);
+            } else {
+                alert(data.message);
+                window.location.href = '/';
+            }
+        });
+    </script>
+</body>
+</html>

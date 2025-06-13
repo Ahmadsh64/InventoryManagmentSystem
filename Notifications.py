@@ -9,7 +9,7 @@ from tkinter import ttk, messagebox, filedialog
 from database import connect_to_database
 from PIL import Image, ImageTk, ImageDraw
 from inventory import open_update_item_window
-
+from sales import Notification_orders
 def refresh_alerts_only(alerts_label):
     conn = connect_to_database()
     cursor = conn.cursor()
@@ -73,6 +73,10 @@ def open_alerts_window(tree_frame, alerts_label,alerts):
     btn_overstock = ttk.Button(switch_frame, text="🟠 עודף מלאי", style="TButton",
                                command=lambda: show_overstock_alerts())
     btn_overstock.pack(side="right", padx=10, ipadx=10)
+    btn_overstock = ttk.Button(switch_frame, text="🟠 עודף מלאי", style="TButton",
+                               command=lambda: Notification_orders(tree_frame))
+    btn_overstock.pack(side="right", padx=10, ipadx=10)
+
 
     # === פונקציה: הצגת חוסר מלאי ===
     def show_low_stock_alerts():
@@ -338,3 +342,6 @@ def open_alerts_window(tree_frame, alerts_label,alerts):
 
     # פתיחה ראשונית על חוסר מלאי
     show_low_stock_alerts()
+
+
+

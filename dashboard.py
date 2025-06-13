@@ -1,14 +1,5 @@
-import os
-import shutil
-from datetime import datetime
 
-import mysql.connector
-import pandas as pd
-import tkinter as tk
-from tkinter import ttk, messagebox, filedialog
 from database import connect_to_database
-from PIL import Image, ImageTk, ImageDraw
-
 import tkinter as tk
 from tkinter import ttk, messagebox
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
@@ -75,7 +66,7 @@ def open_dashboard_window(tree_frame):
     keys = ["total", "overstock", "outofstock", "bestseller", "sales"]
     for i, key in enumerate(keys):
         frame, label = create_stat_card(stats_frame, key, colors[key])
-        frame.grid(row=i // 3, column=i % 3, padx=10, pady=10, sticky="e")
+        frame.grid(row=i // 5, column=i % 5, padx=10, pady=10, sticky="e")
         stats_labels[key] = label
 
     # אזור גרפים

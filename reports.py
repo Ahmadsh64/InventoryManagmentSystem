@@ -1,13 +1,11 @@
 import os
-import shutil
-from datetime import datetime
-
 import mysql.connector
 import pandas as pd
 import tkinter as tk
-from tkinter import ttk, messagebox, filedialog
+from tkinter import ttk, messagebox
 from database import connect_to_database
-from PIL import Image, ImageTk, ImageDraw
+
+from PIL import Image, ImageTk
 
 def open_report_window(tree_frame):
     for widget in tree_frame.winfo_children():
@@ -39,36 +37,20 @@ def open_report_window(tree_frame):
                 ])
                 report_file_name = "דוח_מלאי.xlsx"
 
-
             elif report_type == "דוח מכירות (רכישות)":
-
                 cursor.execute("""
-
                     SELECT p.customer_id, p.customer_name, c.phone_number, c.email, p.item_name, p.quantity, 
-
                            p.total_price, p.purchase_date, p.color, p.size, p.branch_name 
-
-                    FROM inventory_system.Purchases p 
-
-                    INNER JOIN inventory_system.Customers c ON p.customer_name = c.customer_name
-
+                    FROM Purchases p 
+                    INNER JOIN Customers c ON p.customer_name = c.customer_name
                 """)
-
                 rows = cursor.fetchall()
-
                 df = pd.DataFrame(rows, columns=[
-
                     "Customer ID", "Customer Name", "Phone Number", "Email", "Item Name",
-
                     "Quantity", "Total Price", "Purchase Date", "Color", "Size", "Branch Name"
-
                 ])
-
-                report_file_name = "דוח_רכישות.xlsx"
-
-                # המרת תאריך
-
                 df['Purchase Date'] = pd.to_datetime(df['Purchase Date'])
+                report_file_name = "דוח_רכישות.xlsx"
 
             elif report_type == "דוח חוסרים במלאי":
                 cursor.execute("""
@@ -99,7 +81,6 @@ def open_report_window(tree_frame):
                 report_file_name = "דוח_הזמנות.xlsx"
 
             elif report_type == "דוח שולי רווח":
-                # חישוב רווח = סך מכירות - סך עלות
                 cursor.execute("""
                     SELECT p.item_name, SUM(p.total_price) AS total_sales
                     FROM purchases p
@@ -116,13 +97,11 @@ def open_report_window(tree_frame):
                 expenses = cursor.fetchall()
                 expenses_df = pd.DataFrame(expenses, columns=["Item Name", "Total Expense"])
 
-                df = pd.merge(sales_df, expenses_df, on="Item Name", how="left")
+                df = pd.merge(sales_df, expenses_df, on="Item Name", how="left").fillna(0)
                 df['Profit'] = df['Total Sales'] - df['Total Expense']
-                df['Profit'] = df['Total Sales']
                 report_file_name = "דוח_שולי_רווח.xlsx"
 
             elif report_type == "דוח מלאי חודשי":
-                # ניתוח חודשי: רכישות + הוספת מלאי
                 cursor.execute("""
                     SELECT MONTH(p.purchase_date) AS month, p.item_name, SUM(p.quantity) AS total_purchases
                     FROM purchases p
@@ -145,16 +124,18 @@ def open_report_window(tree_frame):
                 report_file_name = "דוח_מלאי_חודשי.xlsx"
 
             elif report_type == "דוח עודפים במלאי":
-                # עודפים: מלאי ישן או בכמות גבוהה
                 cursor.execute("""
-                    SELECT i.sku, i.item_name, i.quantity, i.received, i.last_update, b.branch_name
+                    SELECT i.sku, i.item_name, b.branch_name, i.quantity, i.price, i.received_date, i.is_active,
+                           IFNULL(SUM(p.quantity), 0), TIMESTAMPDIFF(MONTH, i.received_date, CURDATE())
                     FROM inventory i
-                    INNER JOIN branches b ON i.branch_id = b.branch_id
-                    WHERE i.quantity > 50 OR DATEDIFF(NOW(), i.received) > 180
+                    JOIN branches b ON i.branch_id = b.branch_id
+                    LEFT JOIN purchases p ON i.sku = p.sku AND p.purchase_date >= i.received_date
+                    GROUP BY i.sku
+                    HAVING i.quantity > 100 AND SUM(p.quantity) < 100 AND TIMESTAMPDIFF(MONTH, i.received_date, CURDATE()) >= 1
                 """)
                 rows = cursor.fetchall()
                 df = pd.DataFrame(rows, columns=[
-                    "SKU", "Item Name", "Quantity", "Received Date", "Last Update", "Branch Name"
+                    "SKU", "Item Name", "Branch Name", "Quantity", "Price", "Received Date", "Is Active", "Sum Purchased", "Months"
                 ])
                 df['Received Date'] = pd.to_datetime(df['Received Date'])
                 report_file_name = "דוח_עודפים.xlsx"
@@ -163,42 +144,40 @@ def open_report_window(tree_frame):
                 messagebox.showerror("שגיאה", "סוג דוח לא נתמך")
                 return
 
-            # שמירת קובץ Excel
             with pd.ExcelWriter(report_file_name, engine='xlsxwriter', datetime_format='yyyy-mm-dd') as writer:
                 df.to_excel(writer, index=False, sheet_name='דוח')
                 workbook = writer.book
                 worksheet = writer.sheets['דוח']
 
-                # הוספת גרף אם מתאים
                 if report_type in ["דוח מלאי", "דוח מכירות (רכישות)", "דוח הזמנות", "דוח מלאי חודשי"]:
                     chart = workbook.add_chart({'type': 'column'})
                     if report_type == "דוח מלאי":
                         chart.add_series({
                             'name': 'כמות במלאי',
-                            'categories': f'=דוח!B2:B{len(df) + 1}',  # Item Name
-                            'values': f'=דוח!D2:D{len(df) + 1}',  # Quantity
+                            'categories': f'=דוח!B2:B{len(df)+1}',
+                            'values': f'=דוח!D2:D{len(df)+1}',
                         })
                     elif report_type == "דוח מכירות (רכישות)":
                         chart.add_series({
                             'name': 'כמות רכישות',
-                            'categories': f'=דוח!E2:E{len(df) + 1}',  # Item Name
-                            'values': f'=דוח!F2:F{len(df) + 1}',  # Quantity
+                            'categories': f'=דוח!E2:E{len(df)+1}',
+                            'values': f'=דוח!F2:F{len(df)+1}',
                         })
                     elif report_type == "דוח הזמנות":
                         chart.add_series({
                             'name': 'הזמנות לפי מוצר',
-                            'categories': f'=דוח!D2:D{len(df) + 1}',  # Item Name
-                            'values': f'=דוח!E2:E{len(df) + 1}',  # Quantity Added
+                            'categories': f'=דוח!D2:D{len(df)+1}',
+                            'values': f'=דוח!E2:E{len(df)+1}',
                         })
                     elif report_type == "דוח מלאי חודשי":
                         chart.add_series({
                             'name': 'יתרת מלאי חודשית',
-                            'categories': f'=דוח!A2:A{len(df) + 1}',  # Month
-                            'values': f'=דוח!E2:E{len(df) + 1}',  # Balance
+                            'categories': f'=דוח!A2:A{len(df)+1}',
+                            'values': f'=דוח!E2:E{len(df)+1}',
                         })
                     worksheet.insert_chart('M2', chart)
 
-            messagebox.showinfo("הצלחה", f"הדוח נוצר ונשמר כ-{report_file_name}")
+            messagebox.showinfo("הצלחה", f"הדוח נוצר ונשמר כ־{report_file_name}")
             show_report_Button.config(state=tk.NORMAL)
 
         except mysql.connector.Error as e:
@@ -211,20 +190,29 @@ def open_report_window(tree_frame):
         if report_file_name and os.path.exists(report_file_name):
             os.system(f'open "{report_file_name}"' if os.name == "posix" else f'start {report_file_name}')
         else:
-            messagebox.showerror("שגיאה", "הדוח הזה לא נמצא")
+            messagebox.showerror("שגיאה", "הדוח לא נמצא")
 
-    report_window_frame = tk.LabelFrame(tree_frame, text="בחר סוג דוח")
-    report_window_frame.pack(padx=10, pady=10)
+    # סטיילינג
+    style = ttk.Style()
+    style.configure("TLabel", font=("Segoe UI", 11))
+    style.configure("TButton", font=("Segoe UI", 11), padding=6)
+    style.configure("TCombobox", font=("Segoe UI", 11))
 
-    ttk.Label(report_window_frame, text="סוג דוח:").grid(row=0, column=0, padx=5, pady=5)
+    title_label = ttk.Label(tree_frame, text="מערכת דוחות", font=("Segoe UI", 18, "bold"), foreground="#2c3e50")
+    title_label.pack(pady=(10, 20))
+
+    report_window_frame = ttk.LabelFrame(tree_frame, text="בחירת דוח", padding=15)
+    report_window_frame.pack(padx=15, pady=10, fill="x")
+
+    ttk.Label(report_window_frame, text="בחר סוג דוח:").grid(row=0, column=0, padx=10, pady=5, sticky="e")
     report_combobox = ttk.Combobox(report_window_frame, values=[
         "דוח מלאי", "דוח מכירות (רכישות)", "דוח חוסרים במלאי",
         "דוח הזמנות", "דוח שולי רווח", "דוח מלאי חודשי", "דוח עודפים במלאי"
-    ], state="readonly")
-    report_combobox.grid(row=0, column=1, padx=5, pady=5)
+    ], state="readonly", width=30)
+    report_combobox.grid(row=0, column=1, padx=10, pady=5, sticky="w")
 
-    ttk.Button(report_window_frame, text="צור דוח", command=generate_report).grid(row=1, column=0, columnspan=2, pady=10)
+    create_button = ttk.Button(report_window_frame, text="צור דוח", command=generate_report)
+    create_button.grid(row=1, column=0, columnspan=2, pady=15)
 
     show_report_Button = ttk.Button(tree_frame, text="הצג דוח", command=show_report, state=tk.DISABLED)
-    show_report_Button.pack(pady=5)
-
+    show_report_Button.pack(pady=(0, 15))
