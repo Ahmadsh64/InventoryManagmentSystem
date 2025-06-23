@@ -1,18 +1,9 @@
-import os
-
-import requests
-import tkinter as tk
-from tkinter import ttk, messagebox, filedialog
-
-from PIL import Image, ImageTk, ImageDraw
-
-API_URL = "http://localhost:5000/api"
-
 import tkinter as tk
 from tkinter import ttk, messagebox
 from PIL import Image, ImageTk
 import os
 import requests
+API_URL = "http://localhost:5000/api"
 
 # צבעים וממדים גלובליים
 PRIMARY_COLOR = "#2563eb"
@@ -52,9 +43,62 @@ def Notification_orders(tree_frame):
                     background=PRIMARY_COLOR,
                     foreground=BUTTON_TEXT_COLOR)
 
+    def load_branches():
+        try:
+            res = requests.get(f"{API_URL}/branches")
+            data = res.json()
+            branch_filter["values"] = ["הכל"] + [b["branch_name"] for b in data.get("branches", [])]
+            branch_filter.set("הכל")
+        except:
+            branch_filter["values"] = ["הכל"]
+            branch_filter.set("הכל")
+
+    def load_notifications():
+        notif_tree.delete(*notif_tree.get_children())
+
+        # שליפת ערכי הסינון
+        branch = branch_filter.get()
+        status = status_filter.get()
+        date = date_entry.get().strip()
+        search = search_entry.get().lower()
+
+        params = {}
+
+        if branch != "הכל":
+            params["branch_name"] = branch
+        if status != "הכל":
+            params["item_status"] = status
+        if date:
+            params["created_at"] = date
+        if search:
+            params["search"] = search
+
+        try:
+            res = requests.get(f"{API_URL}/notifications", params=params)
+            notifications = res.json()
+
+            for notif in notifications:
+                order_id = notif.get("order_id", "")
+                customer = notif.get("customer_name", "")
+                notif_tree.insert("", "end", values=(order_id, customer))
+
+        except Exception as e:
+            messagebox.showerror("שגיאה", f"שגיאה בטעינת נתונים:\n{str(e)}")
+
+
     # ===== סרגל עליון =====
     top_frame = tk.Frame(tree_frame, height=50, bg=SECONDARY_COLOR)
     top_frame.pack(fill=tk.X, padx=15, pady=10)
+
+    # סינון לפי סניף
+    tk.Label(top_frame, text="סניף:", bg=SECONDARY_COLOR, fg=TEXT_COLOR, font=("Segoe UI", 11)).pack(side=tk.RIGHT, padx=(20, 5))
+    branch_filter = ttk.Combobox(top_frame, width=18, font=("Segoe UI", 11), state="readonly")
+    branch_filter.pack(side=tk.RIGHT)
+
+    # סינון לפי תאריך (פשוט: תאריך בודד)
+    tk.Label(top_frame, text="תאריך:", bg=SECONDARY_COLOR, fg=TEXT_COLOR, font=("Segoe UI", 11)).pack(side=tk.RIGHT, padx=(20, 5))
+    date_entry = ttk.Entry(top_frame, width=12, font=("Segoe UI", 11))  # ניתן להזין YYYY-MM-DD
+    date_entry.pack(side=tk.RIGHT)
 
     # חיפוש
     tk.Label(top_frame, text="🔍 חיפוש:", bg=SECONDARY_COLOR, fg=TEXT_COLOR, font=("Segoe UI", 11)).pack(side=tk.RIGHT)
@@ -69,8 +113,11 @@ def Notification_orders(tree_frame):
     status_filter.pack(side=tk.RIGHT)
 
     # כפתור רענון
-    refresh_btn = ttk.Button(top_frame, text="🔄 רענן")
+    refresh_btn = ttk.Button(top_frame, text="🔄 רענן", command=load_notifications)
     refresh_btn.pack(side=tk.RIGHT, padx=20)
+
+    ahmad= ttk.Button(top_frame, text="פעולות", command=show_order_tracking_dashboard)
+    ahmad.pack(side=tk.RIGHT, padx=20)
 
     # ===== מסגרת ראשית =====
     main_frame = tk.Frame(tree_frame, width=FRAME_WIDTH, height=FRAME_HEIGHT - 80, bg="#ffffff")
@@ -249,49 +296,25 @@ def Notification_orders(tree_frame):
         if not selected:
             return
         item = selected[0]
-        order_id = notif_tree.item(item)["values"][0]
-        notification_id = notif_tree.item(item)["tags"][0]
+
+        values = notif_tree.item(item).get("values", [])
+        if not values:
+            messagebox.showerror("שגיאה", "לא ניתן לקרוא את פרטי ההתראה")
+            return
+
+        order_id = values[0]
+        notification_id = item  # כי זה ה־iid
+
         try:
             res = requests.get(f"{API_URL}/order/{order_id}")
             items = res.json()
             show_order_details(order_id, items)
 
             requests.post(f"{API_URL}/notifications/{notification_id}/mark_read")
-            # אחרי פעולה כלשהי
             load_notifications()
-            show_order_details(order_id, items)  # או לקרוא מחדש לשרת
+            show_order_details(order_id, items)
         except Exception as e:
             messagebox.showerror("שגיאה", str(e))
-
-    notif_tree.bind("<Double-1>", on_notification_click)
-
-    def load_notifications():
-        if not notif_tree.winfo_exists():
-            return
-
-        notif_tree.delete(*notif_tree.get_children())
-        try:
-            res = requests.get(f"{API_URL}/notifications")
-            notifications = res.json()
-        except Exception as e:
-            messagebox.showerror("שגיאה", str(e))
-            return
-
-        search = search_entry.get().lower()
-        stat = status_filter.get()
-
-        for notif in notifications:
-            if search and search not in notif["customer_name"].lower() and search not in str(notif["order_id"]):
-                continue
-            if stat != "הכל" and notif["item_status"] != stat:
-                continue
-            notif_tree.insert(
-                "", tk.END,
-                values=(notif["order_id"], notif["customer_name"]),
-                tags=[notif["notification_id"]]
-            )
-
-    refresh_btn.config(command=load_notifications)
 
     def periodic_refresh():
         try:
@@ -450,28 +473,31 @@ def Notification_orders(tree_frame):
             btn_frame = tk.Frame(popup, pady=10)
             btn_frame.pack(fill="x", padx=10)
 
-            def confirm_taken():
+            def confirm_pickup(order_id, sku):
                 try:
-                    response = requests.post(f"{API_URL}/mark_item_taken", json={
-                        "order_id": order_id,
-                        "sku": item["sku"]
-                    })
-                    if response.status_code == 200:
-                        taken_items.add(item["sku"])
-                        if current_view['mode'] == 'grid':
-                            draw_grid_view(current_view['zone'])
-                        else:
-                            draw_column_view()
-                        update_progress()
-                        update_item_list()
-                        popup.destroy()
-                    else:
-                        messagebox.showerror("שגיאה", "שגיאה בסימון פריט")
-                except Exception as e:
-                    messagebox.showerror("שגיאה", f"שגיאה בסימון פריט:\n{e}")
+                    payload = {"order_id": order_id, "sku": sku}
+                    res = requests.post(f"{API_URL}/mark_item_taken", json=payload)
+                    if res.status_code == 200:
+                        messagebox.showinfo("אישור", "הפריט סומן כנאסף!")
 
-            tk.Button(btn_frame, text="✅ אישור לקיחה", command=confirm_taken,
-                      bg="#4CAF50", fg="white", width=15).pack(side="right", padx=5)
+                        # עדכון תצוגת הפריטים
+                        items = requests.get(f"{API_URL}/order/{order_id}").json()
+                        show_order_details(order_id, items)
+                        update_item_list()
+
+                        # עדכון ההתראות (צד ימין)
+                        load_notifications()
+                    else:
+                        messagebox.showwarning("שגיאה", res.json().get("error", "אירעה שגיאה"))
+                except Exception as e:
+                    messagebox.showerror("שגיאה", str(e))
+
+            sku = item['sku']
+            ttk.Button(
+                btn_frame,
+                text="✅ אישור קבלת פריט",
+                command=lambda oid=order_id, s=sku: confirm_pickup(oid, s)
+            ).pack(side="left", padx=5)
             tk.Button(btn_frame, text="❌ סגור", command=popup.destroy,
                       bg="#f44336", fg="white", width=10).pack(side="left", padx=5)
 
@@ -714,3 +740,80 @@ def Notification_orders(tree_frame):
     tree_frame.bind("<Double-1>", on_notification_click)
     periodic_refresh()
     notif_tree.bind("<Double-1>", on_notification_click)
+
+    load_branches()
+    load_notifications()
+
+def show_order_tracking_dashboard():
+    window = tk.Toplevel()
+    window.title("מעקב אחרי הזמנות")
+    window.geometry("1000x600")
+
+    top_frame = tk.Frame(window)
+    top_frame.pack(fill="x", padx=10, pady=10)
+
+    tk.Label(top_frame, text="סינון לפי סניף:").pack(side="right")
+    branch_var = tk.StringVar()
+    branch_filter = ttk.Combobox(top_frame, textvariable=branch_var, state="readonly")
+    branch_filter.pack(side="right", padx=5)
+
+    tk.Label(top_frame, text="חיפוש:").pack(side="right", padx=(20, 0))
+    search_var = tk.StringVar()
+    search_entry = tk.Entry(top_frame, textvariable=search_var, width=30)
+    search_entry.pack(side="right")
+
+    tk.Button(top_frame, text="רענן", command=lambda: load_data()).pack(side="left", padx=10)
+
+    columns = ("purchase_id", "purchase_date", "customer_name", "item_name", "sku", "quantity", "total_price", "branch_name", "order_status")
+    tree = ttk.Treeview(window, columns=columns, show="headings", height=20)
+    tree.pack(fill="both", expand=True, padx=10, pady=5)
+
+    for col in columns:
+        tree.heading(col, text=col)
+        tree.column(col, anchor="center")
+
+    def load_branches():
+        try:
+            res = requests.get(f"{API_URL}/branches")
+            branches = res.json().get("branches", [])
+            branch_filter['values'] = ["הכל"] + [b['branch_name'] for b in branches]
+            branch_filter.set("הכל")
+        except Exception as e:
+            messagebox.showerror("שגיאה", f"שגיאת טעינת סניפים: {e}")
+
+    def load_data():
+        try:
+            res = requests.get(f"{API_URL}/purchases")
+            data = res.json().get("purchases", [])
+        except Exception as e:
+            messagebox.showerror("שגיאה", f"שגיאת טעינת נתונים: {e}")
+            return
+
+        tree.delete(*tree.get_children())
+
+        search_text = search_var.get().lower()
+        selected_branch = branch_var.get()
+
+        for row in data:
+            if selected_branch != "הכל" and row["branch_name"] != selected_branch:
+                continue
+            if search_text:
+                if not (search_text in row["customer_name"].lower() or
+                        search_text in row["item_name"].lower() or
+                        search_text in row["sku"].lower()):
+                    continue
+
+            tree.insert("", "end", values=(
+                row["purchase_id"],
+                row["purchase_date"],
+                row["customer_name"],
+                row["item_name"],
+                row["sku"],
+                row["quantity"],
+                row["total_price"],
+                row["branch_name"],
+                row["order_status"]
+            ))
+
+    load_branches()
+    load_data()

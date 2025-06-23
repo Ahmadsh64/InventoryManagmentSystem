@@ -1,20 +1,24 @@
-
 from flask import Flask, render_template, request, redirect, url_for, session, jsonify
-from datetime import datetime
 import mysql.connector
+from mysql.connector import Error
+
 
 app = Flask(__name__)
 app.secret_key = "your_secret_key"  # נדרש לניהול session
 
 # ---------- חיבור לבסיס נתונים ----------
 def connect_to_database():
-    return mysql.connector.connect(
-        host="localhost",
-        user="root",
-        password="12345",
-        database="inventory_system"
-    )
-
+    try:
+        conn = mysql.connector.connect(
+            host="localhost",
+            user="root",
+            password="12345",
+            database="inventory_system"
+        )
+        return conn
+    except Error as e:
+        print(f"Error connecting to DB: {e}")
+        return None
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
@@ -86,6 +90,7 @@ def cart():
 def add_to_cart():
     item = request.json
     cart = session.get('cart', [])
+    total = sum(item['total_price'] for item in cart)
     for cart_item in cart:
         if cart_item['sku'] == item['sku']:
             cart_item['quantity'] += item['quantity']
@@ -95,7 +100,7 @@ def add_to_cart():
         item['total_price'] = round(item['price'] * item['quantity'], 2)
         cart.append(item)
     session['cart'] = cart
-    return jsonify({'message': 'הפריט נוסף לעגלה'})
+    return render_template('cart.html', cart=cart, total=total)
 
 @app.route('/purchase', methods=['POST'])
 def purchase():

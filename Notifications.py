@@ -27,7 +27,7 @@ def refresh_alerts_only(alerts_label):
     cursor.execute("""
         SELECT COUNT(*)
         FROM inventory
-        WHERE quantity < 100
+        WHERE quantity < 10 AND is_active=TRUE
     """)
     alert_count = cursor.fetchone()[0]
     conn.commit()
@@ -41,7 +41,7 @@ def refresh_alerts_only(alerts_label):
     LEFT JOIN purchases p ON i.sku = p.sku AND p.purchase_date >= i.received_date
     GROUP BY i.sku
     HAVING SUM(p.quantity) < 100 AND TIMESTAMPDIFF(MONTH, i.received_date, CURDATE()) >= 1
-    ) AS subquery;
+    ) AS subquery; 
             """)
     alerts = cursor.fetchone()[0]
     conn.close()
@@ -73,7 +73,7 @@ def open_alerts_window(tree_frame, alerts_label,alerts):
     btn_overstock = ttk.Button(switch_frame, text="🟠 עודף מלאי", style="TButton",
                                command=lambda: show_overstock_alerts())
     btn_overstock.pack(side="right", padx=10, ipadx=10)
-    btn_overstock = ttk.Button(switch_frame, text="🟠 עודף מלאי", style="TButton",
+    btn_overstock = ttk.Button(switch_frame, text="🟠 הזמנות לקוחות ", style="TButton",
                                command=lambda: Notification_orders(tree_frame))
     btn_overstock.pack(side="right", padx=10, ipadx=10)
 
@@ -112,8 +112,8 @@ def open_alerts_window(tree_frame, alerts_label,alerts):
         action_frame = tk.Frame(tree_frame)
         action_frame.pack(fill="x", pady=10)
 
-        ttk.Button(action_frame, text="✏️ עדכן פריט", command=lambda: open_update_item_window(tree_frame)).pack(
-            side="right", padx=5)
+        ttk.Button(action_frame, text="✏️ עדכן פריט", command=lambda: update_selected_item(tree)).pack(side="right", padx=5)
+
         ttk.Button(action_frame, text="🚫 סמן כלא זמין", command=lambda: mark_item_inactive(selected_item)).pack(
             side="right", padx=5)
 
@@ -141,7 +141,7 @@ def open_alerts_window(tree_frame, alerts_label,alerts):
         cursor.execute("""
             SELECT sku, item_name, quantity, last_updated
             FROM inventory
-            WHERE quantity < 100
+            WHERE quantity < 100 AND is_active = TRUE
             ORDER BY quantity ASC
         """)
         alerts = cursor.fetchall()
@@ -155,6 +155,14 @@ def open_alerts_window(tree_frame, alerts_label,alerts):
 
         if selected_item is not None:
             selected_item.clear()
+
+    def update_selected_item(tree):
+        selected = tree.focus()
+        if not selected:
+            messagebox.showwarning("שים לב", "בחר פריט לעדכון")
+            return
+        sku = tree.item(selected)['values'][0]
+        open_update_item_window(tree_frame, sku)
 
     def mark_item_inactive(selected_item):
         if not selected_item:

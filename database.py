@@ -7,3 +7,8 @@ def connect_to_database():
         password="12345",
         database="inventory_system"
     )
+
+# session.py
+LOGGED_IN_EMPLOYEE_ID = None
+LOGGED_IN_ROLE = None
+LOGGED_IN_USER_INFO = None
