@@ -112,7 +112,8 @@ def open_alerts_window(tree_frame, alerts_label,alerts):
         action_frame = tk.Frame(tree_frame)
         action_frame.pack(fill="x", pady=10)
 
-        ttk.Button(action_frame, text="✏️ עדכן פריט", command=lambda: update_selected_item(tree)).pack(side="right", padx=5)
+        ttk.Button(action_frame, text="✏️ עדכן פריט", command=lambda: update_selected_item(tree)).pack(
+            side="right", padx=5)
 
         ttk.Button(action_frame, text="🚫 סמן כלא זמין", command=lambda: mark_item_inactive(selected_item)).pack(
             side="right", padx=5)
@@ -141,7 +142,7 @@ def open_alerts_window(tree_frame, alerts_label,alerts):
         cursor.execute("""
             SELECT sku, item_name, quantity, last_updated
             FROM inventory
-            WHERE quantity < 100 AND is_active = TRUE
+            WHERE quantity < 10 AND is_active = TRUE
             ORDER BY quantity ASC
         """)
         alerts = cursor.fetchall()
@@ -161,8 +162,14 @@ def open_alerts_window(tree_frame, alerts_label,alerts):
         if not selected:
             messagebox.showwarning("שים לב", "בחר פריט לעדכון")
             return
+
         sku = tree.item(selected)['values'][0]
-        open_update_item_window(tree_frame, sku)
+
+        # ודא ש-tree_frame נשלח כפרמטר או מוגדר כגלובלי
+        try:
+            open_update_item_window(tree_frame, sku)
+        except NameError:
+            messagebox.showerror("שגיאה", "tree_frame לא מוגדר כראוי.")
 
     def mark_item_inactive(selected_item):
         if not selected_item:

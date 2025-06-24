@@ -474,7 +474,7 @@ def open_add_item_window(tree_frame):
     add_item_entries = entries
     add_item_image_label = image_label
 
-def open_update_item_window(tree_frame):
+def open_update_item_window(tree_frame,sku):
     # ניקוי המסגרת הקודמת
     for widget in tree_frame.winfo_children():
         widget.destroy()
@@ -806,6 +806,12 @@ def open_update_item_window(tree_frame):
     global add_item_entries, add_item_image_label
     add_item_entries = entries
     add_item_image_label = image_label
+
+    # ✅ הכנס SKU אוטומטית וטעון נתונים
+    entries["SKU"].delete(0, tk.END)
+    entries["SKU"].insert(0, sku)
+    load_item_details()
+
 
 def open_delete_item_window(tree_frame):
     for widget in tree_frame.winfo_children():
