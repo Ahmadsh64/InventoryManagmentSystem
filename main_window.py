@@ -1,12 +1,5 @@
 import ctypes
 import tkinter as tk
-
-# תמיכה ב־DPI גבוה ב-Windows (למניעת טשטוש)
-try:
-    ctypes.windll.shcore.SetProcessDpiAwareness(1)
-except:
-    pass
-
 from inventory import (
     view_inventory, open_add_item_window, open_search_item_window,
     open_update_item_window, open_delete_item_window,
@@ -15,6 +8,11 @@ from reports import open_report_window
 from Notifications import refresh_alerts_only, open_alerts_window, Notification_orders
 from dashboard import open_modern_dashboard
 
+# תמיכה ב־DPI גבוה ב-Windows (למניעת טשטוש)
+try:
+    ctypes.windll.shcore.SetProcessDpiAwareness(1)
+except:
+    pass
 
 def open_main_window(user_type, user_info):
     main_window = tk.Tk()
@@ -24,13 +22,18 @@ def open_main_window(user_type, user_info):
 
     sidebar_visible = True
 
-    # === מסגרת ראשית למסך כולו ===
     main_container = tk.Frame(main_window, bg="#f5f6fa")
     main_container.pack(fill="both", expand=True)
 
-    # === Sidebar ===
+    main_container.columnconfigure(0, weight=0)  # סרגל צד
+    main_container.columnconfigure(1, weight=1)  # תוכן
+    main_container.rowconfigure(0, weight=1)
+
     sidebar = tk.Frame(main_container, width=230, bg="#2f3640")
-    sidebar.pack(side="left", fill="y")
+    sidebar.grid(row=0, column=0, sticky="ns")
+
+    content_frame = tk.Frame(main_container, bg="#f5f6fa")
+    content_frame.grid(row=0, column=1, sticky="nsew")
 
     logo_label = tk.Label(
         sidebar, text="🌀 StockKeeper", bg="#2f3640", fg="white",
@@ -38,9 +41,6 @@ def open_main_window(user_type, user_info):
     )
     logo_label.pack(pady=(30, 10))
 
-    # === מסגרת תוכן ראשי ===
-    content_frame = tk.Frame(main_container, bg="#f5f6fa")
-    content_frame.pack(side="right", fill="both", expand=True)
 
     # === Header עם גריד (למיקום ממורכז) ===
     header_frame = tk.Frame(content_frame, height=50, bg="#f5f6fa")
@@ -76,17 +76,18 @@ def open_main_window(user_type, user_info):
     def toggle_sidebar():
         nonlocal sidebar_visible
         if sidebar_visible:
-            sidebar.pack_forget()
+            sidebar.grid_remove()
             toggle_btn.config(text="☰")
         else:
-            sidebar.pack(side="left", fill="y")
+            sidebar.grid()
             toggle_btn.config(text="❌")
         sidebar_visible = not sidebar_visible
 
     # === אזור עיקרי לתוכן (TreeView למשל) ===
     global tree_frame
-    tree_frame = tk.Frame(content_frame, bg="white", relief="sunken", bd=1, height=600, width=900)
+    tree_frame = tk.Frame(content_frame, bg="white", relief="sunken", bd=1)
     tree_frame.pack(fill="both", expand=True, padx=20, pady=10)
+
     tree_frame.pack_propagate(False)
 
     # === יצירת כפתורי סרגל צד ===

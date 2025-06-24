@@ -22,18 +22,19 @@ def generate_demo_data(branch_id=None):
     inventory_filter = "WHERE i.is_active = TRUE"
     purchase_filter = ""
     expense_filter = ""
-    params = ()
+    inv_exp_params = ()
+    purchase_params = ()
 
-    # ⬅️ אם נבחר סניף, משתמשים ב־branch_name ולא ב־branch_id
     if branch_id:
+        # שליפת שם הסניף לפי מזהה
+        branch_name = next((b[1] for b in fetch_branches() if b[0] == branch_id), None)
+
         inventory_filter += " AND i.branch_id = %s"
         expense_filter = "WHERE e.branch_id = %s"
-        branch_name = next((b[1] for b in fetch_branches() if b[0] == branch_id), None)
         purchase_filter = "WHERE branch_name = %s"
-        params = (branch_name,)
+
         inv_exp_params = (branch_id,)
-    else:
-        inv_exp_params = ()
+        purchase_params = (branch_name,)
 
     # סה"כ מלאי
     cursor.execute(f"""
@@ -67,7 +68,7 @@ def generate_demo_data(branch_id=None):
         GROUP BY sku 
         ORDER BY total_sold DESC 
         LIMIT 1
-    """, params)
+    """, purchase_params)
     row = cursor.fetchone()
     bestseller = (row["sku"], row["total_sold"]) if row else ("-", 0)
 
@@ -77,7 +78,7 @@ def generate_demo_data(branch_id=None):
         FROM purchases 
         {purchase_filter + ' AND ' if purchase_filter else 'WHERE '}
         purchase_date >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)
-    """, params)
+    """, purchase_params)
     sales_30_days = cursor.fetchone()["total"] or 0
 
     # הוצאות
@@ -93,15 +94,13 @@ def generate_demo_data(branch_id=None):
         SELECT SUM(total_price) AS total 
         FROM purchases 
         {purchase_filter}
-    """, params)
+    """, purchase_params)
     total_income = cursor.fetchone()["total"] or 0
-
-    # המשך הקוד כמו שהיה (קטגוריות, טופ פריטים, חודשיות וכו')...
 
     profit = total_income
     net_profit = total_income - expenses
 
-    # === מלאי לפי סניפים (שם סניף מתוך inventory → branch_id) ===
+    # מלאי לפי סניפים (גרף בר)
     cursor.execute("""
         SELECT b.branch_name, SUM(i.quantity) AS total 
         FROM inventory i
@@ -111,16 +110,16 @@ def generate_demo_data(branch_id=None):
     """)
     branch_inventory = {row["branch_name"]: row["total"] for row in cursor.fetchall()}
 
-    # === קטגוריות מלאי (מתוך inventory) ===
+    # קטגוריות מלאי (גרף עוגה)
     cursor.execute(f"""
         SELECT category, SUM(quantity) AS qty 
         FROM inventory i 
         {inventory_filter}
         GROUP BY category
-    """, params)
+    """, inv_exp_params)
     category_data = {row["category"]: row["qty"] for row in cursor.fetchall()}
 
-    # === הכנסות לפי חודש (מתוך purchases לפי purchase_date) ===
+    # הכנסות לפי חודש
     cursor.execute(f"""
         SELECT DATE_FORMAT(purchase_date, '%Y-%m') AS month, 
                SUM(total_price) AS income
@@ -128,10 +127,10 @@ def generate_demo_data(branch_id=None):
         {purchase_filter}
         GROUP BY month
         ORDER BY month
-    """, params)
+    """, purchase_params)
     income_per_month = {row["month"]: row["income"] for row in cursor.fetchall()}
 
-    # === הוצאות לפי חודש (מתוך expenses לפי expense_date) ===
+    # הוצאות לפי חודש
     cursor.execute(f"""
         SELECT DATE_FORMAT(expense_date, '%Y-%m') AS month, 
                SUM(total_cost) AS cost
@@ -139,10 +138,10 @@ def generate_demo_data(branch_id=None):
         {expense_filter}
         GROUP BY month
         ORDER BY month
-    """, params)
+    """, inv_exp_params)
     expense_per_month = {row["month"]: row["cost"] for row in cursor.fetchall()}
 
-    # === טופ 5 פריטים (מתוך purchases) ===
+    # טופ 5 פריטים
     cursor.execute(f"""
         SELECT sku, SUM(quantity) AS total_sold 
         FROM purchases 
@@ -150,10 +149,10 @@ def generate_demo_data(branch_id=None):
         GROUP BY sku 
         ORDER BY total_sold DESC 
         LIMIT 5
-    """, params)
+    """, purchase_params)
     top_items = [(row["sku"], row["total_sold"]) for row in cursor.fetchall()]
 
-    # === שילוב הכנסות והוצאות לפי חודש ===
+    # הכנסות והוצאות חודשיות
     months = sorted(set(income_per_month.keys()) | set(expense_per_month.keys()))
     monthly_finance = {
         m: (
@@ -163,10 +162,10 @@ def generate_demo_data(branch_id=None):
         for m in months
     }
 
-    # === מכירות לפי חודש (רק הכנסות) ===
+    # מכירות לפי חודש
     monthly_sales = {m: v[0] for m, v in monthly_finance.items()}
 
-    # === גידול במכירות ורווחים בין חודשיים אחרונים ===
+    # גידול במכירות ורווחים בין חודשיים אחרונים
     sorted_months = sorted(monthly_sales.keys())
     if len(sorted_months) >= 2:
         last, current = sorted_months[-2], sorted_months[-1]
@@ -196,21 +195,19 @@ def generate_demo_data(branch_id=None):
         "top_items": top_items,
     }
 
+
 # ============================ פונקציות עזר ============================
 
 def create_chart_frame(parent, title, row=0, column=0):
     frame = tk.LabelFrame(
         parent, text=title, font=("Segoe UI", 11, "bold"),
-        bg="white", width=600, height=550,
+        bg="white", width=380, height=330,
         labelanchor="n", bd=1, relief="solid"
     )
     frame.grid(row=row, column=column, padx=10, pady=10, sticky="nsew")
     frame.grid_propagate(False)
     frame.columnconfigure(0, weight=1)
     return frame
-
-
-
 
 def draw_top_items(items, frame):
     for sku, qty in items:
@@ -222,17 +219,14 @@ def draw_top_items(items, frame):
         tk.Label(row, text=qty_str, bg="white", anchor="e",
                  font=("Segoe UI", 10, "bold"), fg="#007ACC").pack(side="left")
 
-
 def draw_pie_chart(data, frame, title):
     plt.rcParams['font.family'] = 'Arial'
-    fig, ax = plt.subplots(figsize=(3.5, 2))  # מתאים לרוחב 550px
+    fig, ax = plt.subplots(figsize=(3.5, 2))
     ax.pie(data.values(), labels=data.keys(), autopct='%1.1f%%',
            startangle=140, textprops={'fontsize': 10})
     ax.axis('equal')
     fig.tight_layout()
     show_chart(fig, frame)
-
-
 
 def draw_bar_chart(data, frame, title):
     plt.rcParams['font.family'] = 'Arial'
@@ -243,7 +237,6 @@ def draw_bar_chart(data, frame, title):
     fig.tight_layout()
     show_chart(fig, frame)
 
-
 def draw_line_chart(data, frame, title):
     plt.rcParams['font.family'] = 'Arial'
     fig, ax = plt.subplots(figsize=(4, 2.5))  # מתאים לרוחב 550px
@@ -253,7 +246,6 @@ def draw_line_chart(data, frame, title):
     ax.tick_params(axis='y', labelsize=9)
     fig.tight_layout()
     show_chart(fig, frame)
-
 
 def draw_double_line_chart(data, frame, title):
     plt.rcParams['font.family'] = 'Arial'
@@ -269,7 +261,6 @@ def draw_double_line_chart(data, frame, title):
     fig.tight_layout()
     show_chart(fig, frame)
 
-
 def draw_growth_chart(labels, values, frame):
     plt.rcParams['font.family'] = 'Arial'
     fig, ax = plt.subplots(figsize=(4, 2.5))  # מתאים לרוחב 550px
@@ -282,7 +273,6 @@ def draw_growth_chart(labels, values, frame):
     fig.tight_layout()
     show_chart(fig, frame)
 
-
 def show_chart(fig, frame):
     for widget in frame.winfo_children():
         widget.destroy()
@@ -293,7 +283,6 @@ def show_chart(fig, frame):
     widget.grid(row=0, column=0, padx=10, pady=10)
     plt.close(fig)
 
-
 def format_stat_with_growth(title, current, previous, icon):
     try:
         growth = ((current - previous) / previous * 100) if previous else 0
@@ -303,7 +292,6 @@ def format_stat_with_growth(title, current, previous, icon):
     color = "#28A745" if growth >= 0 else "#DC3545"
     text = f"{icon} {title}:\n{current:,} {arrow} {abs(growth):.1f}%"
     return text, color
-
 
 def calculate_growth_rate(monthly_data):
     labels = list(monthly_data.keys())
@@ -317,7 +305,6 @@ def calculate_growth_rate(monthly_data):
     return labels[1:], growth
 
 # ============================ דשבורד ראשי ============================
-
 def open_modern_dashboard(tree_frame):
     # ניקוי המסך
     for widget in tree_frame.winfo_children():
@@ -400,7 +387,7 @@ def open_modern_dashboard(tree_frame):
         ]
 
         for title, value, icon, color in stats:
-            card = tk.Frame(stats_frame, bg="white", width=240, height=80, bd=1, relief="solid")
+            card = tk.Frame(stats_frame, bg="white", width=190, height=80, bd=1, relief="solid")
             card.pack(side="left", padx=10)
             card.pack_propagate(False)
             tk.Label(card, text=title, font=("Segoe UI", 10, "bold"), bg="white", fg="#555").pack(anchor="nw", padx=10)
@@ -421,5 +408,5 @@ def open_modern_dashboard(tree_frame):
     branch_cb.bind("<<ComboboxSelected>>", refresh_dashboard)
 
     # הצגת דשבורד ראשוני
-    update_ui(generate_demo_data())
+    refresh_dashboard()
 

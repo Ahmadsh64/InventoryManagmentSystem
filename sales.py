@@ -3,6 +3,8 @@ from tkinter import ttk, messagebox
 from PIL import Image, ImageTk
 import os
 import requests
+from tkcalendar import DateEntry
+
 API_URL = "http://localhost:5000/api"
 
 # צבעים וממדים גלובליים
@@ -97,7 +99,16 @@ def Notification_orders(tree_frame):
 
     # סינון לפי תאריך (פשוט: תאריך בודד)
     tk.Label(top_frame, text="תאריך:", bg=SECONDARY_COLOR, fg=TEXT_COLOR, font=("Segoe UI", 11)).pack(side=tk.RIGHT, padx=(20, 5))
-    date_entry = ttk.Entry(top_frame, width=12, font=("Segoe UI", 11))  # ניתן להזין YYYY-MM-DD
+    date_entry = DateEntry(
+        top_frame,
+        width=12,
+        font=("Segoe UI", 11),
+        date_pattern='yyyy-mm-dd',
+        background=PRIMARY_COLOR,
+        foreground="white",
+        borderwidth=2,
+        state="readonly"  # שלא יוכלו להקליד ידנית
+    )
     date_entry.pack(side=tk.RIGHT)
 
     # חיפוש

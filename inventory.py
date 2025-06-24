@@ -4,64 +4,209 @@ from datetime import datetime
 import mysql.connector
 from PIL import Image, ImageTk, ImageDraw
 from scanQR import scan_qr_code
-import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 from tkcalendar import DateEntry
 from datetime import date
 import matplotlib.pyplot as plt
 import pandas as pd
 from database import connect_to_database
+import mysql.connector
+import tkinter as tk
+import mysql.connector
 
-# פונקציה לעדכון מפת המחסן לפי סניף
-def update_warehouse_map(parent_frame, branch_id, select_shelf, item_sku=None):
-    # ניקוי המדפים הקודמים
-    for widget in parent_frame.winfo_children():
+# === הגדרות תצוגה ===
+CELL_WIDTH = 60
+CELL_HEIGHT = 40
+BLOCK_SPACING = 30
+TOP_MARGIN = 50
+LEFT_MARGIN = 50
+GRID_SIZE = 10
+zones = [chr(i) for i in range(ord("A"), ord("J") + 1)]  # אזורים A-J
+
+# === משתנים גלובליים ===
+canvas = None
+current_zone_index = 0
+cells = {}
+view_state = {
+    "mode": "column",
+    "zone": zones[0],
+    "zone_index": 0
+}
+
+
+# === שליפת פריטים לפי אזור וסניף ===
+def get_inventory_by_zone(zone, branch_id):
+    conn = connect_to_database()
+    cursor = conn.cursor(dictionary=True)
+    query = """
+        SELECT shelf_zone, shelf_row, shelf_column, sku, item_name, quantity, color, size, is_active
+        FROM inventory
+        WHERE shelf_zone = %s AND branch_id = %s
+    """
+    cursor.execute(query, (zone, branch_id))
+    results = cursor.fetchall()
+    cursor.close()
+    conn.close()
+    return results
+
+
+# === ציור מצב עמודות (מעודכן עם branch_id ו-select_shelf) ===
+def draw_column_view(cnv, tree_frame, branch_id, select_shelf):
+    cnv.delete("all")
+    for zone_index, zone in enumerate(zones):
+        block_x = LEFT_MARGIN + zone_index * (CELL_WIDTH + BLOCK_SPACING)
+        inventory_data = get_inventory_by_zone(zone, branch_id)
+        inventory_map = {(item['shelf_row'], item['shelf_column']): item for item in inventory_data}
+
+        for row in range(1, GRID_SIZE + 1):
+            x1 = block_x
+            y1 = TOP_MARGIN + (row - 1) * CELL_HEIGHT
+            x2 = x1 + CELL_WIDTH
+            y2 = y1 + CELL_HEIGHT
+
+            item = inventory_map.get((row, 1))
+            fill_color = "white"
+            text = f"{zone}-{row:02}"
+
+            if item:
+                if item["quantity"] == 0 or item["is_active"] == 0:
+                    fill_color = "red"
+                elif item["quantity"] <= 10:
+                    fill_color = "orange"
+                elif item["quantity"] < 50:
+                    fill_color = "yellow"
+                else:
+                    fill_color = "lightgreen"
+                text = f"{item['item_name']}\nQty:{item['quantity']}"
+            else:
+                # אם פנוי – הפוך ללחיץ
+                rect_id = cnv.create_rectangle(x1, y1, x2, y2, fill=fill_color, outline="black")
+                text_id = cnv.create_text((x1 + x2) / 2, (y1 + y2) / 2, text=text, font=("Arial", 14))
+                cnv.tag_bind(rect_id, "<Button-1>", lambda e, r=row, z=zone: select_shelf(r, 1, z))
+                cnv.tag_bind(text_id, "<Button-1>", lambda e, r=row, z=zone: select_shelf(r, 1, z))
+                continue  # דילוג כדי לא לצייר פעמיים
+
+            cnv.create_rectangle(x1, y1, x2, y2, fill=fill_color, outline="black")
+            cnv.create_text((x1 + x2) / 2, (y1 + y2) / 2, text=text, font=("Arial", 10))
+
+        label_id = cnv.create_text(block_x + CELL_WIDTH // 2, TOP_MARGIN + 10 * CELL_HEIGHT + 20,
+                                   text=zone, font=("Arial", 14, "bold"), fill="blue")
+        cnv.tag_bind(label_id, "<Button-1>", lambda e, z=zone: switch_to_grid_view(z, tree_frame, branch_id, select_shelf))
+
+    create_navigation_buttons(tree_frame, branch_id, select_shelf)
+
+# === ציור מצב רשת (מעודכן) ===
+def draw_grid_view(cnv, zone, page_index, tree_frame, branch_id, select_shelf):
+    cnv.delete("all")
+    inventory_data = get_inventory_by_zone(zone, branch_id)
+    inventory_map = {(item['shelf_row'], item['shelf_column']): item for item in inventory_data}
+    cells.clear()
+
+    for row in range(1, GRID_SIZE + 1):
+        for col in range(1, GRID_SIZE + 1):
+            x1 = LEFT_MARGIN + (col - 1) * CELL_WIDTH
+            y1 = TOP_MARGIN + (row - 1) * CELL_HEIGHT
+            x2 = x1 + CELL_WIDTH
+            y2 = y1 + CELL_HEIGHT
+
+            item = inventory_map.get((row, col))
+            fill_color = "white"
+            text = f"{zone}-{row:02}-{col:02}"
+
+            if item:
+                if item["quantity"] == 0 or item["is_active"] == 0:
+                    fill_color = "red"
+                elif item["quantity"] <= 10:
+                    fill_color = "orange"
+                elif item["quantity"] < 50:
+                    fill_color = "yellow"
+                else:
+                    fill_color = "lightgreen"
+                text = f"{item['item_name']}\nQty:{item['quantity']}"
+                rect_id = cnv.create_rectangle(x1, y1, x2, y2, fill=fill_color, outline="black")
+                text_id = cnv.create_text((x1 + x2) // 2, (y1 + y2) // 2, text=text, font=("Arial", 8))
+                cells[rect_id] = item
+                cells[text_id] = item
+                cnv.tag_bind(rect_id, "<Button-1>", on_cell_click)
+                cnv.tag_bind(text_id, "<Button-1>", on_cell_click)
+            else:
+                # לחיצה על מיקום פנוי
+                rect_id = cnv.create_rectangle(x1, y1, x2, y2, fill=fill_color, outline="black")
+                text_id = cnv.create_text((x1 + x2) // 2, (y1 + y2) // 2, text=text, font=("Arial", 8))
+                cnv.tag_bind(rect_id, "<Button-1>", lambda e, r=row, c=col, z=zone: select_shelf(r, c, z))
+                cnv.tag_bind(text_id, "<Button-1>", lambda e, r=row, c=col, z=zone: select_shelf(r, c, z))
+
+    cnv.create_text(cnv.winfo_reqwidth() // 2, TOP_MARGIN // 2, text=f"Zone: {zone}", font=("Arial", 16, "bold"))
+    create_navigation_buttons(tree_frame, branch_id, select_shelf)
+
+# === שאר הפונקציות (מתוקנות גם כן): ===
+def switch_to_grid_view(zone, tree_frame, branch_id, select_shelf):
+    global current_zone_index
+    view_state["mode"] = "grid"
+    view_state["zone"] = zone
+    view_state["zone_index"] = zones.index(zone)
+    current_zone_index = view_state["zone_index"]
+    draw_grid_view(canvas, zone, current_zone_index, tree_frame, branch_id, select_shelf)
+
+def grid_prev_zone(tree_frame, branch_id, select_shelf):
+    global current_zone_index
+    if current_zone_index > 0:
+        current_zone_index -= 1
+        draw_grid_view(canvas, zones[current_zone_index], current_zone_index, tree_frame, branch_id, select_shelf)
+
+def grid_next_zone(tree_frame, branch_id, select_shelf):
+    global current_zone_index
+    if current_zone_index < len(zones) - 1:
+        current_zone_index += 1
+        draw_grid_view(canvas, zones[current_zone_index], current_zone_index, tree_frame, branch_id, select_shelf)
+
+def create_navigation_buttons(tree_frame, branch_id, select_shelf):
+    remove_navigation_buttons(tree_frame)
+    button_frame = tk.Frame(tree_frame)
+    button_frame.pack(pady=10)
+    button_frame._custom_buttons = True
+    tk.Button(button_frame, text="← Prev", command=lambda: grid_prev_zone(tree_frame, branch_id, select_shelf)).pack(side=tk.LEFT, padx=10)
+    tk.Button(button_frame, text="Back to Columns", command=lambda: draw_column_view(canvas, tree_frame, branch_id, select_shelf)).pack(side=tk.LEFT, padx=10)
+    tk.Button(button_frame, text="Next →", command=lambda: grid_next_zone(tree_frame, branch_id, select_shelf)).pack(side=tk.LEFT, padx=10)
+
+
+def remove_navigation_buttons(tree_frame):
+    for widget in tree_frame.winfo_children():
+        if isinstance(widget, tk.Frame) and hasattr(widget, "_custom_buttons"):
+            widget.destroy()
+
+
+def on_cell_click(event):
+    clicked_id = canvas.find_withtag("current")[0]
+    item = cells.get(clicked_id)
+    if item:
+        info = (
+            f"Item Name: {item['item_name']}\n"
+            f"SKU: {item['sku']}\n"
+            f"Quantity: {item['quantity']}\n"
+            f"Color: {item['color']}\n"
+            f"Size: {item['size']}\n"
+            f"Shelf Zone: {item['shelf_zone']}\n"
+            f"Shelf Row: {item['shelf_row']}\n"
+            f"Shelf Column: {item['shelf_column']}"
+        )
+        messagebox.showinfo("Item Information", info)
+
+
+# === יצירת המפה הראשית ===
+def create_warehouse_map(tree_frame, select_shelf, branch_id):
+    global canvas
+
+    for widget in tree_frame.winfo_children():
         widget.destroy()
 
-    shelf_rows, shelf_cols = 9, 9
-    occupied_slots = set()  # סט המיקומים תפוסים
-    selected_shelf = None  # משתנה לזיהוי מדף הפריט
+    canvas_width = LEFT_MARGIN  + (CELL_WIDTH + BLOCK_SPACING) * len(zones)
+    canvas_height = TOP_MARGIN  + CELL_HEIGHT * GRID_SIZE + 120
 
-    try:
-        # שליפת המדפים תפוסים מתוך מסד הנתונים לפי branch_id
-        conn = connect_to_database()
-        cur = conn.cursor()
-        cur.execute("""
-             SELECT shelf_row, shelf_column FROM inventory
-             WHERE branch_id = %s
-         """, (branch_id,))
-        occupied_slots = set((r, c) for r, c in cur.fetchall())
+    canvas = tk.Canvas(tree_frame, width=canvas_width, height=canvas_height, bg="white")
+    canvas.pack(anchor="center")
 
-        # אם הוזן SKU של פריט, נסה לשלוף את המיקום שלו
-        if item_sku:
-            cur.execute("""
-                SELECT shelf_row, shelf_column FROM inventory
-                WHERE branch_id = %s AND SKU = %s
-            """, (branch_id, item_sku))
-            selected_shelf = cur.fetchone()
-
-        conn.close()
-    except Exception as e:
-        messagebox.showerror("שגיאה", f"שגיאה בטעינת המדפים: {e}")
-        return
-
-    # יצירת רשת המדפים
-    for r in range(1, shelf_rows + 1):
-        for c in range(1, shelf_cols + 1):
-            status = (r, c) in occupied_slots  # האם המדף תפוס
-            color = "#e74c3c" if status else "#2ecc71"  # אדום = תפוס, ירוק = פנוי
-
-            # אם יש מיקום ספציפי לפריט, סמן אותו בצבע שונה
-            if selected_shelf and (r, c) == selected_shelf:
-                color = "#f39c12"  # צבע צהוב לפריט שנמצא במיקום הזה
-
-            btn = tk.Button(
-                parent_frame, text=f"{r},{c}", width=4, height=2,
-                bg=color, fg="white", relief="raised",
-                state="disabled" if status else "normal",  # לא ניתן לבחור אם תפוס
-                command=lambda row=r, col=c: select_shelf(row, col)
-            )
-            btn.grid(row=r, column=c, padx=1, pady=1)
+    draw_column_view(canvas, tree_frame, branch_id, select_shelf)
 
 def view_inventory(tree_frame):
     for widget in tree_frame.winfo_children():
@@ -248,11 +393,13 @@ def open_add_item_window(tree_frame):
 
 
      # פונקציה לבחירת מיקום מדף
-    def select_shelf(row, col):
+    def select_shelf(row, col, zone):
         entries["shelf_row"].delete(0, tk.END)
-        entries["shelf_row"].insert(0, str(row))
+        entries["shelf_row"].insert(0, row)
         entries["shelf_column"].delete(0, tk.END)
-        entries["shelf_column"].insert(0, str(col))
+        entries["shelf_column"].insert(0, col)
+        entries["shelf_zone"].delete(0, tk.END)
+        entries["shelf_zone"].insert(0, zone)
 
     def scan_and_fill_sku():
         scanned = scan_qr_code()
@@ -264,7 +411,7 @@ def open_add_item_window(tree_frame):
         branch_name = entries["branch"].get()
         branch_id = branch_dict.get(branch_name, -1)
         if branch_id != -1:
-            update_warehouse_map(warehouse_frame, branch_id, select_shelf)
+            create_warehouse_map(warehouse_frame, select_shelf, branch_id)
 
     # פונקציות עזר
     image_path = {"val": None}  # משתמש במילון כדי לעדכן מתוך nested
@@ -319,6 +466,7 @@ def open_add_item_window(tree_frame):
         branch_n = entries["branch"].get().strip()
         color    = entries["color"].get().strip()
         size     = entries["size"].get().strip()
+        zone     = entries["zone"].get().strip()
         row      = entries["shelf_row"].get().strip()
         col      = entries["shelf_column"].get().strip()
         img_p    = image_path.get()
@@ -327,7 +475,7 @@ def open_add_item_window(tree_frame):
         if not (name and sku and category and qty.isdigit()
                 and price.replace('.', '', 1).isdigit()
                 and branch_n in branch_dict
-                and color and size and row.isdigit() and col.isdigit()
+                and color and size and zone.isdigit() and row.isdigit() and col.isdigit()
                 and img_p):
             messagebox.showerror("שגיאה", "אנא מלא/י את השדות כראוי כולל תמונה")
             return
@@ -344,11 +492,11 @@ def open_add_item_window(tree_frame):
             cur  = conn.cursor()
             cur.execute(
                 """INSERT INTO inventory
-                   (item_name, SKU, category, quantity, price, branch_id, color, size, shelf_row, shelf_column, image_path)
-                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+                   (item_name, SKU, category, quantity, price, branch_id, color, size, shelf_zone, shelf_row, shelf_column, image_path)
+                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
                 (
                     name, sku, category, int(qty), float(price),
-                    branch_dict[branch_n], color, size,
+                    branch_dict[branch_n], color, size,int(zone),
                     int(row), int(col), img_p
                 )
             )
@@ -398,11 +546,10 @@ def open_add_item_window(tree_frame):
         "branch": "branch 🏬",
         "color": "color 🎨",
         "size": "size 📏",
+        "shelf_zone": "Zone 🛒",
         "shelf_row": "shelf_row 🛒",
         "shelf_column": "shelf_column 🛒"
     }
-
-    from tkinter import ttk
 
     # הגדרת סגנון ttk אחיד
     style = ttk.Style()
@@ -447,19 +594,19 @@ def open_add_item_window(tree_frame):
 
     tk.Button(tree_frame, text="Select Img 📷", command=select_image,
               bg="#3498db", fg="white", font=btn_font, relief="flat", cursor="hand2") \
-        .grid(row=11, column=2, sticky="w", **btn_pad)
+        .grid(row=13, column=0, sticky="w", **btn_pad)
 
     tk.Button(tree_frame, text="Add ✔️", command=lambda: add_item(entries, image_path_var),
               bg="#27ae60", fg="white", font=btn_font, relief="flat", cursor="hand2") \
-        .grid(row=11, column=3, sticky="w", **btn_pad)
+        .grid(row=13, column=1, sticky="w", **btn_pad)
 
     tk.Button(tree_frame, text="Clear 🧹", command=lambda: clear_inputs(entries, image_path_var),
               bg="#e67e22", fg="white", font=btn_font, relief="flat", cursor="hand2") \
-        .grid(row=12, column=2, sticky="w", **btn_pad)
+        .grid(row=14, column=0, sticky="w", **btn_pad)
 
     tk.Button(tree_frame, text="🔄 Load Shelves", command=refresh_map,
               bg="#2980b9", fg="white", font=btn_font, relief="flat", cursor="hand2") \
-        .grid(row=12, column=3, sticky="w", **btn_pad)
+        .grid(row=14, column=1, sticky="w", **btn_pad)
 
     # === מפת מחסן ===
     tk.Label(tree_frame, text="📦 Warehouse Map", font=("Segoe UI", 20, "bold"),
@@ -474,7 +621,7 @@ def open_add_item_window(tree_frame):
     add_item_entries = entries
     add_item_image_label = image_label
 
-def open_update_item_window(tree_frame):
+def open_update_item_window(tree_frame, sku=""):
     # ניקוי המסגרת הקודמת
     for widget in tree_frame.winfo_children():
         widget.destroy()
@@ -495,11 +642,13 @@ def open_update_item_window(tree_frame):
     branch_names = [""] + sorted(branch_dict.keys())
 
     # פונקציה לבחירת מיקום מדף
-    def select_shelf(row, col):
+    def select_shelf(row, col, zone):
         entries["shelf_row"].delete(0, tk.END)
-        entries["shelf_row"].insert(0, str(row))
+        entries["shelf_row"].insert(0, row)
         entries["shelf_column"].delete(0, tk.END)
-        entries["shelf_column"].insert(0, str(col))
+        entries["shelf_column"].insert(0, col)
+        entries["shelf_zone"].delete(0, tk.END)
+        entries["shelf_zone"].insert(0, zone)
     def scan_and_fill_sku():
         scanned = scan_qr_code()
         if scanned:
@@ -508,9 +657,9 @@ def open_update_item_window(tree_frame):
 
     def refresh_map():
         branch_name = entries["branch"].get()
-        branch_id = branch_dict.get(branch_name)
-        if branch_id:
-            update_warehouse_map(warehouse_frame, branch_id, lambda row, col: select_shelf(row, col))
+        branch_id = branch_dict.get(branch_name, -1)
+        if branch_id != -1:
+            create_warehouse_map(warehouse_frame, select_shelf, branch_id)
 
     # פונקציות עזר
     image_path = {"val": None}  # משתמש במילון כדי לעדכן מתוך nested
@@ -566,6 +715,7 @@ def open_update_item_window(tree_frame):
         branch_name = entries["branch"].get().strip()
         color = entries["color"].get().strip()
         size = entries["size"].get().strip()
+        shelf_zone = entries["shelf_zone"].get().strip()
         shelf_row = entries["shelf_row"].get().strip()
         shelf_column = entries["shelf_column"].get().strip()
         image_path = image_path_var.get()
@@ -575,7 +725,7 @@ def open_update_item_window(tree_frame):
         if not (name and sku and category and quantity.isdigit()
                 and price.replace('.', '', 1).isdigit()
                 and branch_id is not None
-                and color and size and shelf_row.isdigit() and shelf_column.isdigit()
+                and color and size and shelf_zone.isdigit() and shelf_row.isdigit() and shelf_column.isdigit()
                 and image_path):
             messagebox.showerror("שגיאה", "אנא מלא/י את השדות כראוי כולל תמונה")
             return
@@ -597,9 +747,9 @@ def open_update_item_window(tree_frame):
             # עדכון הפריט עם כמות חדשה
             cursor.execute(
                 """UPDATE inventory SET item_name=%s, category=%s, quantity=%s, price=%s, branch_id=%s, 
-                   color=%s, size=%s, shelf_row=%s, shelf_column=%s, image_path=%s WHERE SKU=%s""",
+                   color=%s, size=%s, shelf_zone=%s , shelf_row=%s, shelf_column=%s, image_path=%s WHERE SKU=%s""",
                 (
-                name, category, new_quantity, float(price), branch_id, color, size, shelf_row, shelf_column, image_path,
+                name, category, new_quantity, float(price), branch_id, color, size, shelf_zone ,shelf_row, shelf_column, image_path,
                 sku)
             )
 
@@ -656,7 +806,7 @@ def open_update_item_window(tree_frame):
             connection = connect_to_database()
             cursor = connection.cursor()
             cursor.execute(
-                """SELECT item_name, category, quantity, price, branch_id, color, size, shelf_row, shelf_column, image_path 
+                """SELECT item_name, category, quantity, price, branch_id, color, size, shelf_zone ,shelf_row, shelf_column, image_path 
                    FROM inventory WHERE SKU=%s""",
                 (sku,)
             )
@@ -669,6 +819,7 @@ def open_update_item_window(tree_frame):
                 entries["branch"].delete(0, tk.END)
                 entries["color"].delete(0, tk.END)
                 entries["size"].delete(0, tk.END)
+                entries["shelf_zone"].delete(0, tk.END)
                 entries["shelf_row"].delete(0, tk.END)
                 entries["shelf_column"].delete(0, tk.END)
 
@@ -679,20 +830,23 @@ def open_update_item_window(tree_frame):
                 entries["branch"].set(item[4])
                 entries["color"].insert(0, item[5])
                 entries["size"].insert(0, item[6])
-                entries["shelf_row"].insert(0, str(item[7]))
-                entries["shelf_column"].insert(0, str(item[8]))
-                image_path_var.set(item[9])
+                entries["shelf_zone"].insert(0, str(item[7]))
+                entries["shelf_row"].insert(0, str(item[8]))
+                entries["shelf_column"].insert(0, str(item[9]))
+                image_path_var.set(item[10])
 
-                def select_shelf(row, col):
+                def select_shelf(row, col, zone):
                     entries["shelf_row"].delete(0, tk.END)
-                    entries["shelf_row"].insert(0, str(row))
+                    entries["shelf_row"].insert(0, row)
                     entries["shelf_column"].delete(0, tk.END)
-                    entries["shelf_column"].insert(0, str(col))
+                    entries["shelf_column"].insert(0, col)
+                    entries["shelf_zone"].delete(0, tk.END)
+                    entries["shelf_zone"].insert(0, zone)
 
-                update_warehouse_map(warehouse_frame, item[4], select_shelf)
+                create_warehouse_map(warehouse_frame, select_shelf, item[4])
 
-                if item[9] and os.path.exists(item[9]):
-                    display_image(item[9])
+                if item[10] and os.path.exists(item[10]):
+                    display_image(item[10])
                 else:
                     image_label.config(image="")
                     image_label.image = None
@@ -728,6 +882,7 @@ def open_update_item_window(tree_frame):
         "branch": "Branch 🏬",
         "color": "Color 🎨",
         "size": "Size 📏",
+        "shelf_zone": "Zone 🛒",
         "shelf_row": "Shelf Row 🛒",
         "shelf_column": "Shelf Column 🛒"
     }
@@ -806,6 +961,14 @@ def open_update_item_window(tree_frame):
     global add_item_entries, add_item_image_label
     add_item_entries = entries
     add_item_image_label = image_label
+
+    # ✅ הכנס SKU אוטומטית וטעון נתונים
+    entries["SKU"].delete(0, tk.END)
+    entries["SKU"].insert(0, sku)
+
+
+    load_item_details()
+
 
 def open_delete_item_window(tree_frame):
     for widget in tree_frame.winfo_children():
@@ -1031,6 +1194,7 @@ def open_search_item_window(tree_frame):
 
     def search_items(event=None):
         branch = combo_branch.get()  # הסניף הנבחר
+        status = combo_status.get()
         sku = entry_sku.get().strip()
         name = entry_name.get().strip()
         category = entry_category.get().strip()
@@ -1057,6 +1221,10 @@ def open_search_item_window(tree_frame):
         if branch and branch != "בחר סניף":
             query += " AND branches.branch_address LIKE %s"
             params.append(f"%{branch}%")
+        if status == "Available":
+            query += " AND inventory.is_active = 1"
+        elif status == "Unavailable":
+            query += " AND inventory.is_active = 0"
 
         try:
             connection = connect_to_database()
@@ -1208,6 +1376,14 @@ def open_search_item_window(tree_frame):
     combo_branch = ttk.Combobox(form_frame, values=["Select Branch"], state="readonly", font=("Segoe UI", 16), width=20)
     combo_branch.grid(row=0, column=1, padx=5, pady=5, sticky="w")
 
+    # ComboBox לבחירת זמינות
+    label_status = tk.Label(form_frame, text="Availability:", font=("Segoe UI", 16, "bold"), bg="#f8f9fa")
+    label_status.grid(row=0, column=4, padx=5, pady=5, sticky="w")
+
+    combo_status = ttk.Combobox(form_frame, values=["All", "Available", "Unavailable"], state="readonly",font=("Segoe UI", 16), width=20)
+    combo_status.grid(row=0, column=5, padx=5, pady=5, sticky="w")
+    combo_status.current(0)
+
     # טעינת סניפים מהמסד
     try:
         connection = connect_to_database()
@@ -1224,6 +1400,7 @@ def open_search_item_window(tree_frame):
 
     # חיבור אירועים לחיפוש בזמן אמת
     combo_branch.bind("<<ComboboxSelected>>", search_items)
+    combo_status.bind("<<ComboboxSelected>>", search_items)
     entry_sku.bind("<KeyRelease>", search_items)
     entry_name.bind("<KeyRelease>", search_items)
     entry_category.bind("<KeyRelease>", search_items)
@@ -1527,7 +1704,7 @@ def open_finance_window(tree_frame):
 
     # === מסגרות עיקריות ===
     filter_frame = tk.Frame(tree_frame, bg="white")
-    filter_frame.pack(fill="both", padx=10, pady=(10, 20))
+    filter_frame.pack(fill="x", padx=10, pady=(10, 20))
 
     table_frame = tk.Frame(tree_frame, bg="#ffffff", bd=1, relief="solid")
     table_frame.pack(fill="both", expand=True, padx=15, pady=10)
@@ -1546,30 +1723,26 @@ def open_finance_window(tree_frame):
     conn.close()
 
     # === רכיבי סינון ===
-    tk.Label(filter_frame, text=":בחר סניף📍", font=("Segoe UI", 14, "bold"), bg="#f5f6fa").grid(row=0, column=7,
-                                                                                                padx=10, pady=5)
+    tk.Label(filter_frame, text=":בחר סניף📍", font=("Segoe UI", 14, "bold"), bg="#f5f6fa").pack(side="right", padx=10, pady=5)
     branch_combo = ttk.Combobox(filter_frame, values=list(branch_dict.keys()), width=25, font=("Segoe UI", 12),
                                 state="readonly")
-    branch_combo.grid(row=0, column=6, padx=10, pady=5)
+    branch_combo.pack(side="right", padx=10, pady=5)
 
-    tk.Label(filter_frame, text=":קטגוריה🏷️", font=("Segoe UI", 14, "bold"), bg="#f5f6fa").grid(row=0, column=5,
-                                                                                                padx=10, pady=5)
+    tk.Label(filter_frame, text=":קטגוריה🏷️", font=("Segoe UI", 14, "bold"), bg="#f5f6fa").pack(side="right", padx=10, pady=5)
     category_combo = ttk.Combobox(filter_frame, values=["כל הקטגוריות"], width=18,
                                   font=("Segoe UI", 11), state="readonly")
     category_combo.set("כל הקטגוריות")
-    category_combo.grid(row=0, column=4, padx=2, pady=3)
+    category_combo.pack(side="right", padx=10, pady=5)
 
-    tk.Label(filter_frame, text=":מתאריך📅", font=("Segoe UI", 14, "bold"), bg="#f5f6fa").grid(row=0, column=3, padx=10,
-                                                                                              pady=5)
+    tk.Label(filter_frame, text=":מתאריך📅", font=("Segoe UI", 14, "bold"), bg="#f5f6fa").pack(side="right", padx=10, pady=5)
     start_date = DateEntry(filter_frame, date_pattern="yyyy-mm-dd", font=("Segoe UI", 12))
     start_date.set_date(date.today())
-    start_date.grid(row=0, column=2, padx=10, pady=5)
+    start_date.pack(side="right", padx=10, pady=5)
 
-    tk.Label(filter_frame, text=":עד תאריך📅", font=("Segoe UI", 14, "bold"), bg="#f5f6fa").grid(row=0, column=1,
-                                                                                                padx=10, pady=5)
+    tk.Label(filter_frame, text=":עד תאריך📅", font=("Segoe UI", 14, "bold"), bg="#f5f6fa").pack(side="right", padx=10, pady=5)
     end_date = DateEntry(filter_frame, date_pattern="yyyy-mm-dd", font=("Segoe UI", 12))
     end_date.set_date(date.today())
-    end_date.grid(row=0, column=0, padx=10, pady=5)
+    end_date.pack(side="right", padx=10, pady=5)
 
     # === פונקציה לעדכון קטגוריות לפי סניף ===
     def update_categories_by_branch(event=None):
@@ -1848,20 +2021,21 @@ def open_finance_window(tree_frame):
             df.to_excel(file_path, index=False)
             messagebox.showinfo("הצלחה", f"הקובץ נשמר:\n{file_path}")
 
-    tk.Button(filter_frame, text="✅רק הכנסות", command=filter_income,
-              bg="#2ecc71", fg="white", font=("Segoe UI", 12), relief="flat").grid(row=1, column=7, padx=10, pady=5)
 
-    tk.Button(filter_frame, text="📉רק הוצאות", command=filter_expense,
-              bg="#e74c3c", fg="white", font=("Segoe UI", 12), relief="flat").grid(row=1, column=6, padx=10, pady=5)
+    tk.Button(summary_frame, text="✅רק הכנסות", command=filter_income,
+              bg="#2ecc71", fg="white", font=("Segoe UI", 12), relief="flat").pack(side="right", padx=10, pady=5)
 
-    tk.Button(filter_frame, text="🔄איפוס", command=reset_filters,
-              bg="#95a5a6", fg="white", font=("Segoe UI", 12), relief="flat").grid(row=1, column=5, padx=10, pady=5)
+    tk.Button(summary_frame, text="📉רק הוצאות", command=filter_expense,
+              bg="#e74c3c", fg="white", font=("Segoe UI", 12), relief="flat").pack(side="right", padx=10, pady=5)
 
-    tk.Button(filter_frame, text="📊הצג", command=show_financial_data,
-              bg="#3498db", fg="white", font=("Segoe UI", 12), relief="flat").grid(row=1, column=4, padx=10, pady=5)
+    tk.Button(summary_frame, text="🔄איפוס", command=reset_filters,
+              bg="#95a5a6", fg="white", font=("Segoe UI", 12), relief="flat").pack(side="right", padx=10, pady=5)
 
-    tk.Button(filter_frame, text="📃סיכום כללי", command=show_total_summary,
-              bg="#9b59b6", fg="white", font=("Segoe UI", 12), relief="flat").grid(row=1, column=3, padx=10, pady=5)
+    tk.Button(summary_frame, text="📊הצג", command=show_financial_data,
+              bg="#3498db", fg="white", font=("Segoe UI", 12), relief="flat").pack(side="right", padx=10, pady=5)
+
+    tk.Button(summary_frame, text="📃סיכום כללי", command=show_total_summary,
+              bg="#9b59b6", fg="white", font=("Segoe UI", 12), relief="flat").pack(side="right", padx=10, pady=5)
 
     # === משתנה סיכום ===
     summary_var = tk.StringVar()

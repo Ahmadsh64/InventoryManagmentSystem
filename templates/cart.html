@@ -1,54 +1,85 @@
-
 <!DOCTYPE html>
-<html lang="he">
+<html lang="he" dir="rtl">
 <head>
     <meta charset="UTF-8">
-    <title>עגלת הקניות</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <title>עגלת קניות</title>
+    <style>
+        body { font-family: Arial; direction: rtl; padding: 20px; background: #f4f4f4; }
+        table { width: 100%; border-collapse: collapse; margin-top: 20px; background: white; }
+        th, td { padding: 10px; border: 1px solid #ccc; text-align: center; }
+        img { max-width: 80px; max-height: 80px; }
+        .checkout-form { margin-top: 20px; background: white; padding: 20px; border-radius: 5px; }
+        button { background: green; color: white; padding: 10px; border: none; border-radius: 5px; cursor: pointer; }
+        .remove-form, .readd-form { display: inline-block; margin-top: 10px; }
+    </style>
 </head>
 <body>
-    <h1>עגלת הקניות שלך</h1>
-    {% if cart|length == 0 %}
-        <p>העגלה ריקה.</p>
-        <a href="{{ url_for('index') }}">חזרה לחיפוש פריטים</a>
-    {% else %}
+    <h2>עגלת הקניות שלך</h2>
+
+    {% if cart %}
         <table>
             <thead>
                 <tr>
+                    <th>תמונה</th>
                     <th>שם פריט</th>
+                    <th>צבע</th>
+                    <th>מידה</th>
                     <th>כמות</th>
-                    <th>מחיר ליחידה (₪)</th>
-                    <th>מחיר כולל (₪)</th>
+                    <th>מחיר ליח'</th>
+                    <th>סה\"כ</th>
+                    <th>פעולות</th>
                 </tr>
             </thead>
             <tbody>
                 {% for item in cart %}
-                    <tr>
-                        <td>{{ item.item_name }}</td>
-                        <td>{{ item.quantity }}</td>
-                        <td>{{ item.price }}</td>
-                        <td>{{ item.total_price }}</td>
-                    </tr>
+                <tr>
+                    <td>
+                        {% if item.image_path %}
+                            <img src="/static/images/{{ item.image_path }}" alt="{{ item.item_name }}">
+                        {% else %}
+                            אין תמונה
+                        {% endif %}
+                    </td>
+                    <td>{{ item.item_name }}</td>
+                    <td>{{ item.color }}</td>
+                    <td>{{ item.size }}</td>
+                    <td>{{ item.quantity }}</td>
+                    <td>₪{{ "%.2f"|format(item.price) }}</td>
+                    <td>₪{{ "%.2f"|format(item.price * item.quantity) }}</td>
+                    <td>
+                        <!-- הסרה מהעגלה -->
+                        <form method="POST" action="{{ url_for('remove_from_cart') }}" style="display:inline-block;">
+                            <input type="hidden" name="sku" value="{{ item.sku }}">
+                            <input type="hidden" name="color" value="{{ item.color }}">
+                            <input type="hidden" name="size" value="{{ item.size }}">
+                            <button type="submit" style="background:red;">הסר</button>
+                        </form>
+
+                        <!-- הוספה חוזרת -->
+                        <form method="POST" action="{{ url_for('add_to_cart') }}" style="display:inline-block;">
+                            <input type="hidden" name="sku" value="{{ item.sku }}">
+                            <input type="hidden" name="color" value="{{ item.color }}">
+                            <input type="hidden" name="size" value="{{ item.size }}">
+                            <input type="hidden" name="quantity" value="1">
+                            <button type="submit" style="background:blue;">הוסף שוב</button>
+                        </form>
+                    </td>
+                </tr>
                 {% endfor %}
             </tbody>
         </table>
-        <h3>סה"כ לתשלום: ₪{{ total }}</h3>
-        <button id="purchase-btn">סיים רכישה</button>
-        <br><br>
-        <a href="{{ url_for('index') }}">המשך קניות</a>
-    {% endif %}
 
-    <script>
-        document.getElementById('purchase-btn')?.addEventListener('click', async () => {
-            const res = await fetch('/purchase', { method: 'POST' });
-            const data = await res.json();
-            if (data.error) {
-                alert('שגיאה: ' + data.error);
-            } else {
-                alert(data.message);
-                window.location.href = '/';
-            }
-        });
-    </script>
+<h3>סה"כ לתשלום: ₪{{ "%.2f"|format(total) }}</h3>
+
+        <!-- טופס ביצוע רכישה -->
+        <form class="checkout-form" method="POST" action="{{ url_for('checkout') }}">
+            <h4>בחר אמצעי תשלום:</h4>
+            <label><input type="radio" name="payment_method" value="credit_card" required> כרטיס אשראי</label><br>
+            <label><input type="radio" name="payment_method" value="gift_card"> גיפט קארד</label><br>
+            <button type="submit">בצע רכישה</button>
+        </form>
+    {% else %}
+        <p>העגלה שלך ריקה.</p>
+    {% endif %}
 </body>
 </html>

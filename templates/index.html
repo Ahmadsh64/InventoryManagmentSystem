@@ -1,30 +1,344 @@
 <!DOCTYPE html>
-<html>
+<html lang="he">
 <head>
-    <title>רשימת פריטים</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-
+    <meta charset="UTF-8" />
+    <title>ברוך הבא {{ customer_name }}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+    <style>
+        /* קצת עיצוב בסיסי לדוגמה */
+        body {
+            font-family: Arial, sans-serif;
+            direction: rtl;
+            margin: 0;
+            padding: 0;
+            background: #f9f9f9;
+        }
+        .main-header {
+            background-color: #fff;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 10px 20px;
+            box-shadow: 0 0 10px #ccc;
+        }
+        .menu-wrapper {
+            position: relative;
+        }
+        .menu-toggle {
+            cursor: pointer;
+            font-size: 24px;
+            user-select: none;
+        }
+        .side-menu {
+            display: none;
+            position: absolute;
+            top: 40px;
+            right: 0;
+            background: white;
+            border: 1px solid #ddd;
+            box-shadow: 0 0 10px #aaa;
+            z-index: 100;
+            width: 220px;
+        }
+        .side-menu ul {
+            list-style: none;
+            padding: 10px;
+            margin: 0;
+        }
+        .side-menu ul li {
+            padding: 8px 10px;
+            border-bottom: 1px solid #eee;
+            cursor: pointer;
+        }
+        .side-menu ul li:hover {
+            background-color: #eee;
+        }
+        .logo-container .logo {
+            height: 50px;
+            cursor: pointer;
+        }
+        .profile-wrapper {
+            position: relative;
+            cursor: pointer;
+        }
+        .profile-icon img {
+            width: 40px;
+            border-radius: 50%;
+        }
+        .profile-menu {
+            display: none;
+            position: absolute;
+            right: 0;
+            top: 50px;
+            background: white;
+            padding: 10px;
+            border: 1px solid #ddd;
+            box-shadow: 0 0 10px #aaa;
+            width: 200px;
+            text-align: right;
+            z-index: 100;
+        }
+        .profile-menu p {
+            margin: 5px 0;
+        }
+        .logout-link {
+            color: red;
+            text-decoration: none;
+            font-weight: bold;
+        }
+        .container {
+            padding: 20px;
+            max-width: 1100px;
+            margin: auto;
+        }
+        .filter-form {
+            margin-bottom: 20px;
+            display: flex;
+            gap: 15px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+        .filter-form label {
+            font-weight: bold;
+        }
+        .filter-form select,
+        .filter-form button {
+            padding: 5px 10px;
+            font-size: 16px;
+        }
+        .inventory-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+            gap: 20px;
+        }
+        .item-card {
+            background: white;
+            padding: 15px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            box-shadow: 0 0 5px #ccc;
+        }
+        .item-card h4 {
+            margin: 0 0 10px 0;
+        }
+        .item-card p {
+            margin: 5px 0;
+        }
+        .item-card form label {
+            display: block;
+            margin-top: 10px;
+            font-weight: bold;
+        }
+        .item-card form select,
+        .item-card form input[type="number"] {
+            width: 100%;
+            padding: 5px;
+            margin-top: 5px;
+            box-sizing: border-box;
+        }
+        .item-card form button {
+            margin-top: 10px;
+            width: 100%;
+            background-color: #d32f2f;
+            border: none;
+            color: white;
+            padding: 10px;
+            font-weight: bold;
+            cursor: pointer;
+            border-radius: 3px;
+        }
+        .item-card form button:hover {
+            background-color: #b71c1c;
+        }
+    </style>
 </head>
-<body class="bg-light">
-<div class="container mt-4">
-    <h2>רשימת פריטים</h2>
-{% for item in items %}
-  <div>
-    <h3>{{ item.item_name }}</h3>
-    <img src="/static/{{ item.image_path }}" width="150">
-    <p>מחיר: {{ item.price }} ₪</p>
-    <p>צבע: {{ item.color }}, מידה: {{ item.size }}</p>
+<body>
+    <!-- כותרת עליונה -->
+    <div class="main-header">
+        <!-- סמל סל קניות -->
+        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" />
+        <!-- ואז -->
+        <a href="{{ url_for('cart') }}" class="cart-icon">
+    <i class="fas fa-shopping-cart"></i>
+<span class="cart-count">🛒</span>
 
-    <form action="/add_to_cart/{{ item.sku }}" method="post">
-        <input type="number" name="quantity" min="1" max="{{ item.quantity }}" value="1">
-        <input type="submit" value="הוסף לעגלה">
-    </form>
-  </div>
-{% endfor %}
-<a href="/cart">לעגלה שלי</a>
+</a>
+
+<style>
+.cart-count {
+    background: red;
+    color: white;
+    border-radius: 50%;
+    padding: 2px 6px;
+    font-size: 12px;
+    position: relative;
+    top: -10px;
+    right: -5px;
+}
+</style>
 
 
+
+        <!-- תפריט צדדי -->
+        <div class="menu-wrapper">
+            <div class="menu-toggle" id="menu-toggle">☰</div>
+            <div class="side-menu" id="side-menu">
+                <ul>
+                    <li>שירות לקוחות</li>
+                    <li>שאלות ותשובות</li>
+                    <li>משלוחים</li>
+                    <li>החלפות והחזרות</li>
+                    <li>ביטול עסקה</li>
+                    <li>רכישת DREAM GIFT CARD</li>
+                    <li>צור קשר</li>
+                    <li>מחשיבון</li>
+                    <li>שוברי קניה</li>
+                    <li>שליח חינם בקניה מעל ₪199</li>
+                </ul>
+            </div>
+        </div>
+
+
+        <!-- לוגו -->
+        <div class="logo-container">
+            <img src="{{ url_for('static', filename='images/LOGO-FOX.png') }}" alt="Logo" class="logo" />
+        </div>
+
+
+        <!-- פרופיל לקוח -->
+        <div class="profile-wrapper" id="profile-wrapper">
+            <div class="profile-icon">
+                <img src="{{ url_for('static', filename='images/profile-icon.png') }}" alt="Profile" />
+            </div>
+            <div class="profile-menu" id="profile-menu">
+                <p><strong>{{ customer_name }}</strong></p>
+                <p>{{ email }}</p>
+                <p>{{ phone }}</p>
+                <hr />
+                <a href="{{ url_for('logout') }}" class="logout-link">התנתק</a>
+            </div>
+        </div>
     </div>
-</div>
+
+    <!-- תוכן עמוד -->
+    <div class="container">
+        <h2>ברוך הבא {{ customer_name }}</h2>
+
+        <!-- טופס סינון -->
+        <form method="get" action="/" class="filter-form">
+            <label for="branch_id">בחר סניף:</label>
+            <select name="branch_id" id="branch_id">
+                <option value="">כל הסניפים</option>
+                {% for branch in branches %}
+                    <option value="{{ branch.branch_id }}" {% if branch.branch_id == selected_branch %}selected{% endif %}>
+                        {{ branch.branch_name }}
+                    </option>
+                {% endfor %}
+            </select>
+
+            <label for="category">בחר קטגוריה:</label>
+            <select name="category" id="category">
+                <option value="">כל הקטגוריות</option>
+                {% for cat in categories %}
+                    <option value="{{ cat }}" {% if cat == selected_category %}selected{% endif %}>{{ cat }}</option>
+                {% endfor %}
+            </select>
+
+            <button type="submit">סנן</button>
+        </form>
+
+        {% with messages = get_flashed_messages() %}
+  {% if messages %}
+    <div class="flash-message">
+      {% for message in messages %}
+        <p>{{ message }}</p>
+      {% endfor %}
+    </div>
+  {% endif %}
+{% endwith %}
+
+<h3>המלאי הזמין</h3>
+
+        <h3>המלאי הזמין</h3>
+        <div class="inventory-grid">
+
+            {% if inventory %}
+                {% for item in inventory %}
+                    <div class="item-card">
+                        <h3>{{ item.item_name }}</h3>
+                           <img src="/static/{{ item.image_path }}"width="150">
+                        <h4>{{ item.item_name }}</h4>
+                        <p>קטגוריה: {{ item.category }}</p>
+                        <p>סניף: {{ item.branch_name or 'לא ידוע' }}</p>
+                        <p>כמות זמינה: {{ item.quantity }}</p>
+                        <p>מחיר: ₪{{ "%.2f"|format(item.price) }}</p>
+
+                        <!-- טופס הוספה לעגלה -->
+                        <form method="POST" action="{{ url_for('add_to_cart') }}">
+    <input type="hidden" name="sku" value="{{ item.sku }}" />
+
+    <label for="color_{{ item.sku }}">בחר צבע:</label>
+    <select name="color" id="color_{{ item.sku }}" required>
+        <option value="{{ item.color }}">{{ item.color }}</option>
+    </select>
+
+    <label for="size_{{ item.sku }}">בחר מידה:</label>
+    <select name="size" id="size_{{ item.sku }}" required>
+        <option value="{{ item.size }}">{{ item.size }}</option>
+    </select>
+
+    <label for="quantity_{{ item.sku }}">כמות להזמנה:</label>
+    <input
+        type="number"
+        name="quantity"
+        id="quantity_{{ item.sku }}"
+        min="1"
+        max="{{ item.quantity }}"
+        value="1"
+        required
+    />
+
+    <button type="submit">הוסף לעגלה</button>
+</form>
+
+                    </div>
+                {% endfor %}
+            {% else %}
+                <p>אין פריטים זמינים כרגע.</p>
+            {% endif %}
+        </div>
+    </div>
+
+    <script>
+        // סקריפט לפתיחת וסגירת התפריט הצדדי
+        document.getElementById('menu-toggle').addEventListener('click', function() {
+            const menu = document.getElementById('side-menu');
+            menu.style.display = (menu.style.display === 'block') ? 'none' : 'block';
+        });
+
+        // סקריפט לפתיחת וסגירת תפריט פרופיל
+        document.getElementById('profile-wrapper').addEventListener('click', function() {
+            const profileMenu = document.getElementById('profile-menu');
+            profileMenu.style.display = (profileMenu.style.display === 'block') ? 'none' : 'block';
+        });
+
+        // סגירת תפריטים אם לוחצים מחוץ אליהם
+        document.addEventListener('click', function(event) {
+            const menu = document.getElementById('side-menu');
+            const toggle = document.getElementById('menu-toggle');
+            const profileMenu = document.getElementById('profile-menu');
+            const profileWrapper = document.getElementById('profile-wrapper');
+
+            if (!menu.contains(event.target) && !toggle.contains(event.target)) {
+                menu.style.display = 'none';
+            }
+            if (!profileMenu.contains(event.target) && !profileWrapper.contains(event.target)) {
+                profileMenu.style.display = 'none';
+            }
+        });
+
+    </script>
+
+
 </body>
 </html>
