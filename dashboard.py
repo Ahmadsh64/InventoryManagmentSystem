@@ -47,8 +47,16 @@ def generate_demo_data(branch_id=None):
     # עודף מלאי
     cursor.execute(f"""
         SELECT COUNT(*) AS overstock 
-        FROM inventory i 
-        {inventory_filter} AND i.quantity > 100
+    FROM (
+    SELECT i.sku, i.item_name, b.branch_name, i.quantity, i.received_date, i.is_active,
+                   IFNULL(SUM(p.quantity), 0), TIMESTAMPDIFF(MONTH, i.received_date, CURDATE())
+            FROM inventory i
+            JOIN branches b ON i.branch_id = b.branch_id
+            LEFT JOIN purchases p ON i.sku = p.sku AND p.purchase_date >= i.received_date
+{inventory_filter}
+            GROUP BY i.sku
+            HAVING i.quantity > 50 AND i.is_active = TRUE AND SUM(p.quantity) < 100 AND TIMESTAMPDIFF(MONTH, i.received_date, CURDATE()) >= 1
+    ) AS subquery; 
     """, inv_exp_params)
     overstock_items = cursor.fetchone()["overstock"] or 0
 
@@ -310,13 +318,13 @@ def open_modern_dashboard(tree_frame):
     for widget in tree_frame.winfo_children():
         widget.destroy()
 
-    tree_frame.configure(bg="#f4f9ff")
+    tree_frame.configure(bg="white")
 
     # סינון סניף
-    top_frame = tk.Frame(tree_frame, bg="#f4f9ff")
+    top_frame = tk.Frame(tree_frame, bg="white")
     top_frame.pack(pady=10)
 
-    tk.Label(top_frame, text="בחר סניף:", bg="#f4f9ff", font=("Segoe UI", 12)).pack(side=tk.LEFT, padx=5)
+    tk.Label(top_frame, text="בחר סניף:", bg="white", font=("Segoe UI", 12)).pack(side=tk.LEFT, padx=5)
     branch_cb = ttk.Combobox(top_frame, state="readonly", width=30, font=("Segoe UI", 11))
     branches = fetch_branches()
     branch_cb["values"] = ["כל הסניפים"] + [f"{b[0]} - {b[1]}" for b in branches]
@@ -324,16 +332,16 @@ def open_modern_dashboard(tree_frame):
     branch_cb.pack(side=tk.LEFT, padx=5)
 
     # כותרת לסניף
-    branch_label = tk.Label(tree_frame, text="נתוני כלל הסניפים", bg="#f4f9ff",
+    branch_label = tk.Label(tree_frame, text="נתוני כלל הסניפים", bg="white",
                             font=("Segoe UI", 12, "bold"), fg="#1b75bb")
     branch_label.pack(pady=(5, 0))
 
     # סטטיסטיקות
-    stats_frame = tk.Frame(tree_frame, bg="#f4f9ff")
+    stats_frame = tk.Frame(tree_frame, bg="white")
     stats_frame.pack(fill="x", padx=20, pady=10)
 
     # אזור הגרפים
-    charts_frame = tk.Frame(tree_frame, bg="#f4f9ff")
+    charts_frame = tk.Frame(tree_frame, bg="white")
     charts_frame.pack(fill="both", expand=True, padx=20, pady=5)
 
     # גרידים נכונים

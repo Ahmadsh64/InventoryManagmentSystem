@@ -14,6 +14,8 @@ try:
 except:
     pass
 
+# ... (התחלה זהה)
+
 def open_main_window(user_type, user_info):
     main_window = tk.Tk()
     main_window.title("Inventory Management System")
@@ -22,57 +24,59 @@ def open_main_window(user_type, user_info):
 
     sidebar_visible = True
 
-    main_container = tk.Frame(main_window, bg="#f5f6fa")
+    # הגדרות פונט וסגנון
+    FONT_FAMILY = "Segoe UI"
+    BUTTON_FONT = (FONT_FAMILY, 13)
+    HEADER_FONT = (FONT_FAMILY, 14, "bold")
+
+    main_container = tk.Frame(main_window, bg="white")
     main_container.pack(fill="both", expand=True)
 
-    main_container.columnconfigure(0, weight=0)  # סרגל צד
-    main_container.columnconfigure(1, weight=1)  # תוכן
+    main_container.columnconfigure(0, weight=0)
+    main_container.columnconfigure(1, weight=1)
     main_container.rowconfigure(0, weight=1)
 
     sidebar = tk.Frame(main_container, width=230, bg="#2f3640")
     sidebar.grid(row=0, column=0, sticky="ns")
 
-    content_frame = tk.Frame(main_container, bg="#f5f6fa")
+    content_frame = tk.Frame(main_container, bg="white")
     content_frame.grid(row=0, column=1, sticky="nsew")
 
+    # לוגו/שם אפליקציה
     logo_label = tk.Label(
         sidebar, text="🌀 StockKeeper", bg="#2f3640", fg="white",
         font=("Segoe UI", 18, "bold")
     )
     logo_label.pack(pady=(30, 10))
 
-
-    # === Header עם גריד (למיקום ממורכז) ===
-    header_frame = tk.Frame(content_frame, height=50, bg="#f5f6fa")
+    # --- Header ---
+    header_frame = tk.Frame(content_frame, height=50, bg="white")
     header_frame.pack(fill="x")
     header_frame.pack_propagate(False)
 
     header_frame.columnconfigure(0, weight=1)
-    header_frame.columnconfigure(1, weight=2)
+    header_frame.columnconfigure(1, weight=4)
     header_frame.columnconfigure(2, weight=1)
 
     toggle_btn = tk.Button(
         header_frame, text="❌", command=lambda: toggle_sidebar(),
-        font=("Segoe UI", 12), bg="#f5f6fa", bd=0, fg="#2f3640", cursor="hand2"
+        font=(FONT_FAMILY, 12), bg="white", bd=0, fg="#2f3640", cursor="hand2"
     )
     toggle_btn.grid(row=0, column=0, sticky="w", padx=10)
 
     header = tk.Label(
         header_frame,
         text=f"Welcome, {user_info[1]} ({user_type.title()})",
-        font=("Segoe UI", 13, "bold"),
-        bg="#f5f6fa",
-        fg="#2f3640"
+        font=HEADER_FONT, bg="#f5f6fa", fg="#2f3640"
     )
     header.grid(row=0, column=1)
 
     alerts_label = tk.Label(
-        header_frame, text="", font=("Segoe UI", 12, "bold"),
-        bg="#f5f6fa", fg="red"
+        header_frame, text="", font=(FONT_FAMILY, 12, "bold"),
+        bg="white", fg="red"
     )
     alerts_label.grid(row=0, column=2, sticky="e", padx=10)
 
-    # === פונקציית הצגת/הסתרת הסרגל ===
     def toggle_sidebar():
         nonlocal sidebar_visible
         if sidebar_visible:
@@ -83,19 +87,18 @@ def open_main_window(user_type, user_info):
             toggle_btn.config(text="❌")
         sidebar_visible = not sidebar_visible
 
-    # === אזור עיקרי לתוכן (TreeView למשל) ===
+    # --- עיצוב אזור התוכן ---
     global tree_frame
     tree_frame = tk.Frame(content_frame, bg="white", relief="sunken", bd=1)
     tree_frame.pack(fill="both", expand=True, padx=20, pady=10)
-
     tree_frame.pack_propagate(False)
 
-    # === יצירת כפתורי סרגל צד ===
+    # === יצירת כפתור סרגל צד עם עיצוב אחיד ===
     def create_sidebar_button(text, command, icon=None):
         btn = tk.Button(
             sidebar,
             text=f"{icon}  {text}" if icon else text,
-            font=("Segoe UI", 13),
+            font=BUTTON_FONT,
             bg="#353b48",
             fg="white",
             activebackground="#40739e",
@@ -105,11 +108,12 @@ def open_main_window(user_type, user_info):
             pady=10,
             anchor="w",
             command=command,
-            cursor="hand2"
+            cursor="hand2",
+            relief="flat"
         )
-        btn.pack(fill="x", padx=10, pady=4)
+        btn.pack(fill="x", padx=12, pady=4)
 
-    # === כפתורים לפי תפקיד המשתמש ===
+    # --- כפתורי ניווט לפי סוג המשתמש ---
     if user_type == "manager":
         refresh_alerts_only(alerts_label)
         create_sidebar_button("Add Item", lambda: open_add_item_window(tree_frame), "➕")
@@ -134,13 +138,12 @@ def open_main_window(user_type, user_info):
         create_sidebar_button("View Inventory", lambda: view_inventory(tree_frame), "📦")
         create_sidebar_button("Purchase", lambda: open_purchase_window(tree_frame, user_info), "🛒")
 
-    # === Logout ===
     create_sidebar_button("Logout", lambda: return_to_login(main_window), "⏏️")
 
-    # === Footer ===
+    # --- כיתוב תחתון ---
     footer = tk.Label(
         sidebar, text="© 2025 FOX Stores", bg="#2f3640", fg="#dcdde1",
-        font=("Segoe UI", 9), anchor="center"
+        font=(FONT_FAMILY, 9), anchor="center"
     )
     footer.pack(side="bottom", pady=15)
 

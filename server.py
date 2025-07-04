@@ -27,11 +27,11 @@ def get_unread_notifications():
     cursor = conn.cursor(dictionary=True)
 
     branch_name = request.args.get("branch_name")
-    status = request.args.get("status")
-    date = request.args.get("date")
+    status = request.args.get("item_status")
+    date = request.args.get("created_at")
     search = request.args.get("search")
 
-    query = """
+    base_query = """
         SELECT 
             n.notification_id,
             n.order_id,
@@ -49,6 +49,7 @@ def get_unread_notifications():
         JOIN purchases p ON n.order_id = p.purchase_id
         JOIN order_items o ON n.order_id = o.order_id
         LEFT JOIN inventory i ON o.sku = i.sku
+        WHERE 1=1
     """
 
     filters = []
@@ -71,15 +72,19 @@ def get_unread_notifications():
         values.append(f"%{search}%")
         values.append(f"%{search}%")
 
+    # שילוב הסינון בשאילתה
     if filters:
-        query += " AND " + " AND ".join(filters)
+        base_query += " AND " + " AND ".join(filters)
 
-    query += " ORDER BY n.created_at DESC"
+    # הגבלת תוצאות כדי למנוע עומס (תוכל לשנות ל-100 או יותר)
+    base_query += " ORDER BY n.created_at DESC LIMIT 50"
 
-    cursor.execute(query, values)
+    cursor.execute(base_query, values)
     notifications = cursor.fetchall()
+
     cursor.close()
     conn.close()
+
     return jsonify(notifications)
 
 # === שליפת מפת מחסן כולל מיקום פריטים של הזמנה ===
@@ -129,16 +134,30 @@ def inventory_by_zone(zone):
 def get_order_details(order_id):
     conn = connect_to_database()
     cursor = conn.cursor(dictionary=True)
-    cursor.execute("""
-    SELECT o.sku, o.order_item_id, o.order_id, o.item_name, o.color,
-    o.quantity,o.size, o.item_status ,i.image_path
-            FROM order_items o
-            JOIN inventory i ON o.sku = i.sku
-            WHERE o.order_id = %s
-                """, (order_id,))
+
+    query = """
+        SELECT 
+            o.order_item_id,
+            o.order_id,
+            o.sku,
+            o.item_name,
+            o.color,
+            o.size,
+            o.quantity,
+            o.item_status,
+            i.image_path
+        FROM order_items o
+        LEFT JOIN inventory i ON o.sku = i.sku
+        WHERE o.order_id = %s
+        ORDER BY o.item_name ASC
+    """
+
+    cursor.execute(query, (order_id,))
     items = cursor.fetchall()
+
     cursor.close()
     conn.close()
+
     return jsonify(items)
 
 @app.route("/api/notifications/<int:notification_id>/mark_read", methods=["POST"])
@@ -187,18 +206,15 @@ def mark_item_taken():
     data = request.get_json()
     order_id = data.get("order_id")
     sku = data.get("sku")
-    employee_id = data.get("employee_id")  # נוסף
 
     conn = connect_to_database()
     cursor = conn.cursor()
 
     cursor.execute("""
         UPDATE order_items
-        SET item_status = 'נלקח',
-            fulfilled_at = NOW(),
-            processed_by_employee_id = %s
+        SET item_status = 'נלקח' 
         WHERE order_id = %s AND sku = %s
-    """, (employee_id, order_id, sku))
+    """, ( order_id, sku))
 
     conn.commit()
     cursor.close()
@@ -256,7 +272,7 @@ def complete_order_fulfillment(order_id):
         # עדכון המלאי
         cursor.execute("""
             UPDATE inventory
-            SET quantity = quantity - %s, last_update = NOW()
+            SET quantity = quantity - %s, last_updated = NOW()
             WHERE sku = %s
         """, (item["quantity"], item["sku"]))
 
@@ -270,9 +286,7 @@ def complete_order_fulfillment(order_id):
     # עדכון ההתראה - סומן כנקרא והוספת שדה זמן סיום
     cursor.execute("""
         UPDATE order_notifications
-        SET is_read = 1,
-            created_at = created_at,  -- שמירה על השדה המקורי
-            completed_at = NOW()      -- תוספת חדשה שנרחיב עליה מטה
+        SET is_read = 1
         WHERE order_id = %s
     """, (order_id,))
 
@@ -281,6 +295,51 @@ def complete_order_fulfillment(order_id):
     conn.close()
     return jsonify({"status": "fulfilled"})
 
+@app.route("/api/warehouse_map_full_for_order/<int:order_id>", methods=["GET"])
+def warehouse_map_full_for_order(order_id):
+    conn = connect_to_database()
+    if not conn:
+        return jsonify({"error": "אין חיבור למסד הנתונים"}), 500
+    cursor = conn.cursor(dictionary=True)
+
+    try:
+        # שליפת פריטים של ההזמנה כולל מיקום
+        cursor.execute("""
+            SELECT o.sku, o.item_name, i.shelf_row, i.shelf_column, i.shelf_zone, 
+                   i.image_path, i.quantity, i.color, i.size
+            FROM order_items o
+            JOIN inventory i ON o.sku = i.sku
+            WHERE o.order_id = %s
+        """, (order_id,))
+        order_items = cursor.fetchall()
+
+        # שליפת כל המלאי הפעיל לפי אזורים
+        cursor.execute("""
+            SELECT sku, item_name, shelf_zone, shelf_row, shelf_column, quantity,
+                   color, size, image_path
+            FROM inventory
+            WHERE is_active = 1
+        """)
+        inventory = cursor.fetchall()
+
+        # קיבוץ לפי אזור
+        zones = {}
+        for item in inventory:
+            zone = item['shelf_zone']
+            if zone not in zones:
+                zones[zone] = []
+            zones[zone].append(item)
+
+        return jsonify({
+            "items": order_items,
+            "zones": zones
+        })
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    finally:
+        cursor.close()
+        conn.close()
 
 @app.route("/api/purchases")
 def get_purchases():

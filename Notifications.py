@@ -23,7 +23,7 @@ def refresh_alerts_only(alerts_label):
 
     conn.commit()
 
-    # ספירת פריטים עם עודף מלאי (מתחת ל-10)
+    # ספירת פריטים עם חוסר מלאי (מתחת ל-10)
     cursor.execute("""
         SELECT COUNT(*)
         FROM inventory
@@ -35,12 +35,13 @@ def refresh_alerts_only(alerts_label):
     cursor.execute("""
     SELECT COUNT(*) 
     FROM (
-    SELECT i.sku, i.item_name, b.branch_name, i.quantity, i.received_date
-    FROM inventory i
-    JOIN branches b ON i.branch_id = b.branch_id
-    LEFT JOIN purchases p ON i.sku = p.sku AND p.purchase_date >= i.received_date
-    GROUP BY i.sku
-    HAVING SUM(p.quantity) < 100 AND TIMESTAMPDIFF(MONTH, i.received_date, CURDATE()) >= 1
+    SELECT i.sku, i.item_name, b.branch_name, i.quantity, i.received_date, i.is_active,
+                   IFNULL(SUM(p.quantity), 0), TIMESTAMPDIFF(MONTH, i.received_date, CURDATE())
+            FROM inventory i
+            JOIN branches b ON i.branch_id = b.branch_id
+            LEFT JOIN purchases p ON i.sku = p.sku AND p.purchase_date >= i.received_date
+            GROUP BY i.sku
+            HAVING i.quantity > 50 AND i.is_active = TRUE AND SUM(p.quantity) < 100 AND TIMESTAMPDIFF(MONTH, i.received_date, CURDATE()) >= 1
     ) AS subquery; 
             """)
     alerts = cursor.fetchone()[0]
@@ -112,7 +113,9 @@ def open_alerts_window(tree_frame, alerts_label,alerts):
         action_frame = tk.Frame(tree_frame)
         action_frame.pack(fill="x", pady=10)
 
-        ttk.Button(action_frame, text="✏️ עדכן פריט", command=lambda: update_selected_item(tree)).pack(side="right", padx=5)
+        ttk.Button(action_frame, text="✏️ עדכן פריט",
+                   command=lambda: update_selected_item(tree, tree_frame)).pack(
+            side="right", padx=5)
 
         ttk.Button(action_frame, text="🚫 סמן כלא זמין", command=lambda: mark_item_inactive(selected_item)).pack(
             side="right", padx=5)
@@ -141,7 +144,7 @@ def open_alerts_window(tree_frame, alerts_label,alerts):
         cursor.execute("""
             SELECT sku, item_name, quantity, last_updated
             FROM inventory
-            WHERE quantity < 100 AND is_active = TRUE
+            WHERE quantity < 10 AND is_active = TRUE
             ORDER BY quantity ASC
         """)
         alerts = cursor.fetchall()
@@ -156,13 +159,19 @@ def open_alerts_window(tree_frame, alerts_label,alerts):
         if selected_item is not None:
             selected_item.clear()
 
-    def update_selected_item(tree):
+    def update_selected_item(tree, tree_frame):
         selected = tree.focus()
         if not selected:
             messagebox.showwarning("שים לב", "בחר פריט לעדכון")
             return
+
         sku = tree.item(selected)['values'][0]
-        open_update_item_window(tree_frame, sku)
+
+        # ודא ש-tree_frame נשלח כפרמטר או מוגדר כגלובלי
+        try:
+            open_update_item_window(tree_frame, sku)
+        except NameError:
+            messagebox.showerror("שגיאה", "tree_frame לא מוגדר כראוי.")
 
     def mark_item_inactive(selected_item):
         if not selected_item:
@@ -242,7 +251,7 @@ def open_alerts_window(tree_frame, alerts_label,alerts):
             JOIN branches b ON i.branch_id = b.branch_id
             LEFT JOIN purchases p ON i.sku = p.sku AND p.purchase_date >= i.received_date
             GROUP BY i.sku
-            HAVING SUM(p.quantity) < 100 AND TIMESTAMPDIFF(MONTH, i.received_date, CURDATE()) >= 1
+            HAVING i.quantity > 50 AND i.is_active = TRUE AND SUM(p.quantity) < 100 AND TIMESTAMPDIFF(MONTH, i.received_date, CURDATE()) >= 1
         """)
         alerts = cursor.fetchall()
         conn.close()
