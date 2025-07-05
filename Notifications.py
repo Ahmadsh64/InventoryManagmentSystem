@@ -1,15 +1,10 @@
-import os
-import shutil
-from datetime import datetime
 
-import mysql.connector
-import pandas as pd
-import tkinter as tk
-from tkinter import ttk, messagebox, filedialog
+from tkinter import messagebox
 from database import connect_to_database
-from PIL import Image, ImageTk, ImageDraw
 from inventory import open_update_item_window
 from sales import Notification_orders
+from ui_utils import create_window_button
+
 def refresh_alerts_only(alerts_label):
     conn = connect_to_database()
     cursor = conn.cursor()
@@ -52,73 +47,58 @@ def refresh_alerts_only(alerts_label):
     else:
         alerts_label.config(text="✔ אין התראות", fg="green")
 
-def open_alerts_window(tree_frame, alerts_label,alerts):
+def open_alerts_window(tree_frame, alerts_label, alerts):
     from datetime import datetime
+    import tkinter as tk
+    from tkinter import ttk
+
     for widget in tree_frame.winfo_children():
         widget.destroy()
 
-    # === מסגרת כפתורי מעבר ===
-    switch_frame = tk.Frame(tree_frame)
-    switch_frame.pack(fill="x", pady=(0, 10))
-
     style = ttk.Style()
-    style.configure("TButton", font=("Segoe UI", 12), padding=10,bg="",fg="red")
-    style.map("TButton",
-              background=[("active", "#ececec")],
-              foreground=[("active", "#000")])
+    style.configure("TButton", font=("Segoe UI", 11, "bold"), padding=6)
+    style.configure("Custom.Treeview.Heading", font=("Segoe UI", 11, "bold"), background="#f0f0f0", foreground="black")
+    style.configure("Custom.Treeview", font=("Segoe UI", 10), rowheight=30)
+    style.map("Custom.Treeview", background=[("selected", "#d9edf7")])
 
-    btn_low_stock = ttk.Button(switch_frame, text="🔴 חוסר מלאי", style="TButton",
-                               command=lambda: show_low_stock_alerts())
-    btn_low_stock.pack(side="right", padx=10, ipadx=10)
+    # === כפתורי מעבר ===
+    switch_frame = tk.Frame(tree_frame, bg="#ffffff")
+    switch_frame.pack(fill="x", pady=(5, 10), padx=10)
 
-    btn_overstock = ttk.Button(switch_frame, text="🟠 עודף מלאי", style="TButton",
-                               command=lambda: show_overstock_alerts())
-    btn_overstock.pack(side="right", padx=10, ipadx=10)
-    btn_overstock = ttk.Button(switch_frame, text="🟠 הזמנות לקוחות ", style="TButton",
-                               command=lambda: Notification_orders(tree_frame))
-    btn_overstock.pack(side="right", padx=10, ipadx=10)
+    create_window_button(switch_frame,"🔴 חוסר מלאי",  command=lambda: show_low_stock_alerts()).pack(side="right", padx=5)
+    create_window_button(switch_frame,"🟠 עודף מלאי", command=lambda:  show_overstock_alerts()).pack(side="right", padx=5)
+    create_window_button(switch_frame,"🟢 הזמנות לקוחות", command=lambda:  Notification_orders(tree_frame)).pack(side="right", padx=5)
 
-
-    # === פונקציה: הצגת חוסר מלאי ===
+    # === פונקציית חוסר מלאי ===
     def show_low_stock_alerts():
         for widget in tree_frame.winfo_children():
             if widget != switch_frame:
                 widget.destroy()
 
-        control_frame = tk.Frame(tree_frame, bg="#f8f9fa", bd=2, relief="groove")
+        control_frame = tk.Frame(tree_frame, bg="#f9f9f9", bd=1, relief="solid")
         control_frame.pack(fill="x", padx=10, pady=(0, 10))
 
-        ttk.Button(control_frame, text="🔄 רענן רשימה",command=lambda: show_low_stock_alerts()).pack(side="right", padx=10, pady=5)
+        create_window_button(control_frame, text="🔄 רענון", command=show_low_stock_alerts).pack(side="right", padx=10, pady=5)
 
-        # פקד עזר לשמירת הפריט הנבחר
         selected_item = {}
-
-        style.configure("Custom.Treeview.Heading", font=("Segoe UI", 11, "bold"), background="#f0f0f0",
-                        foreground="black")
-        style.configure("Custom.Treeview", font=("Segoe UI", 11), rowheight=30)
-        style.map("Custom.Treeview", background=[("selected", "#cce5ff")])
-
         tree = ttk.Treeview(tree_frame, columns=("sku", "item", "quantity", "last_updated"), show="headings",
                             style="Custom.Treeview")
-        tree.heading("sku", text="sku")
-        tree.heading("item", text="שם פריט")
-        tree.heading("quantity", text="כמות נוכחית")
-        tree.heading("last_updated", text="עודכן לאחרונה")
+        headings = [("sku", "SKU"), ("item", "שם פריט"), ("quantity", "כמות"), ("last_updated", "עודכן לאחרונה")]
+        for col, text in headings:
+            tree.heading(col, text=text)
+            tree.column(col, anchor="center", stretch=True)
         tree.pack(fill="both", expand=True, padx=10, pady=5)
 
-        # מילוי הנתונים
         refresh_low_stock_alerts(tree, selected_item)
 
         # פעולות נוספות
-        action_frame = tk.Frame(tree_frame)
-        action_frame.pack(fill="x", pady=10)
+        action_frame = tk.Frame(tree_frame, bg="#ffffff")
+        action_frame.pack(fill="x", padx=10, pady=10)
 
-        ttk.Button(action_frame, text="✏️ עדכן פריט",
-                   command=lambda: update_selected_item(tree, tree_frame)).pack(
-            side="right", padx=5)
-
-        ttk.Button(action_frame, text="🚫 סמן כלא זמין", command=lambda: mark_item_inactive(selected_item)).pack(
-            side="right", padx=5)
+        create_window_button(action_frame, text="✏️ עדכן פריט",
+                   command=lambda: update_selected_item(tree, tree_frame)).pack(side="right", padx=5)
+        create_window_button(action_frame, text="🚫 סמן כלא זמין",
+                   command=lambda: mark_item_inactive(selected_item)).pack(side="right", padx=5)
 
         # לחיצה על שורה
         def on_select(event):
@@ -186,60 +166,45 @@ def open_alerts_window(tree_frame, alerts_label,alerts):
         show_low_stock_alerts()
 
     # === פונקציה: הצגת עודף מלאי ===
+    # === פונקציית עודף מלאי ===
     def show_overstock_alerts():
         for widget in tree_frame.winfo_children():
             if widget != switch_frame:
                 widget.destroy()
 
-        control_frame = tk.Frame(tree_frame)
-        control_frame.pack(fill="x", pady=(0, 10))
+        control_frame = tk.Frame(tree_frame, bg="#f9f9f9", bd=1, relief="solid")
+        control_frame.pack(fill="x", padx=10, pady=(0, 10))
+
+        create_window_button(control_frame, text="🔄 רענון", command=show_overstock_alerts).pack(side="right", padx=10, pady=5)
 
         selected_item = {}
-        style.configure("Custom.Treeview.Heading", font=("Segoe UI", 11, "bold"), background="#f0f0f0",
-                        foreground="black")
-        style.configure("Custom.Treeview", font=("Segoe UI", 11), rowheight=30)
-        style.map("Custom.Treeview", background=[("selected", "#cce5ff")])
-        tree = ttk.Treeview(tree_frame,
-                            columns=("sku", "item", "branch", "quantity", "received","Availability", "purchased", "months"),
-                            show="headings")
-        tree.heading("sku",text="SKU")
-        tree.heading("item", text="item_name")
-        tree.heading("branch", text="branch")
-        tree.heading("quantity", text="quantity")
-        tree.heading("received", text="Date_received")
-        tree.heading("Availability", text="Availability")
-        tree.heading("purchased", text="Purchased")
-        tree.heading("months", text="Months")
+        columns = ("sku", "item", "branch", "quantity", "received", "Availability", "purchased", "months")
+        tree = ttk.Treeview(tree_frame, columns=columns, show="headings", style="Custom.Treeview")
 
+        headers = {
+            "sku": "SKU",
+            "item": "שם פריט",
+            "branch": "סניף",
+            "quantity": "כמות",
+            "received": "התקבל בתאריך",
+            "Availability": "זמינות",
+            "purchased": "נרכש",
+            "months": "חודשים"
+        }
+
+        for col in columns:
+            tree.heading(col, text=headers[col])
         tree.pack(fill="both", expand=True, padx=10, pady=5)
 
         refresh_overstock_alerts(tree, selected_item)
 
-        action_frame = tk.Frame(tree_frame)
-        action_frame.pack(fill="x", pady=10)
+        action_frame = tk.Frame(tree_frame, bg="#ffffff")
+        action_frame.pack(fill="x", padx=10, pady=10)
 
-        ttk.Button(action_frame, text="🏷️ מבצע מחיר", command=lambda: open_discount_item_window(selected_item)).pack(side="right", padx=10)
-        ttk.Button(action_frame, text="🚚 העבר סניף", command=lambda: open_transfer_item_window(selected_item)).pack(side="right", padx=10)
-        ttk.Button(control_frame, text="🔄 רענן רשימה",command=lambda: show_overstock_alerts()).pack(side="right", padx=10, pady=5)
-
-
-        def on_select(event):
-            cur_item = tree.focus()
-            if cur_item:
-                values = tree.item(cur_item)["values"]
-                selected_item.update({
-                    "sku": values[0],
-                    "item_name": values[1],
-                    "branch": values[2],
-                    "quantity": values[3],
-                    "received": values[4],
-                    "Availability":values[5],
-                    "purchased": values[6],
-                    "months": values[7]
-                })
-
-        tree.bind("<Double-1>", on_select)
-
+        create_window_button(action_frame, text="🏷️ מבצע מחיר",
+                   command=lambda: open_discount_item_window(selected_item)).pack(side="right", padx=5)
+        create_window_button(action_frame, text="🚚 העבר סניף",
+                   command=lambda: open_transfer_item_window(selected_item)).pack(side="right", padx=5)
     def refresh_overstock_alerts(tree=None, selected_item=None):
         conn = connect_to_database()
         cursor = conn.cursor()
@@ -305,7 +270,7 @@ def open_alerts_window(tree_frame, alerts_label,alerts):
             messagebox.showinfo("הצלחה", "המחיר עודכן למבצע בהצלחה.")
             discount_window.destroy()
 
-        ttk.Button(discount_window, text="אשר מבצע", command=apply_discount).pack(pady=10)
+        create_window_button(discount_window, text="אשר מבצע", command=apply_discount).pack(pady=10)
 
     def open_transfer_item_window(selected_item):
         if not selected_item:
@@ -355,10 +320,7 @@ def open_alerts_window(tree_frame, alerts_label,alerts):
             messagebox.showinfo("הצלחה", "הפריט הועבר לסניף החדש בהצלחה.")
             transfer_window.destroy()
 
-        ttk.Button(transfer_window, text="אשר העברה", command=transfer_item).pack(pady=10)
+        create_window_button(transfer_window, text="אשר העברה", command=transfer_item).pack(pady=10)
 
     # פתיחה ראשונית על חוסר מלאי
     show_low_stock_alerts()
-
-
-

@@ -2,15 +2,91 @@ import os
 import mysql.connector
 import pandas as pd
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import messagebox
 from database import connect_to_database
 
-from PIL import Image, ImageTk
-
 def open_report_window(tree_frame):
+    import os
+    import mysql.connector
+    import pandas as pd
+    import tkinter as tk
+    from tkinter import messagebox
+    from database import connect_to_database
+
     for widget in tree_frame.winfo_children():
         widget.destroy()
 
+    report_combobox = tk.StringVar()
+    global report_file_name
+    report_file_name = ""
+    cards_refs = {}
+
+    def create_report_button(master, text, command):
+        def on_enter(e): btn['bg'] = "#40739e"
+        def on_leave(e): btn['bg'] = "#353b48"
+        btn = tk.Button(
+            master, text=text, font=("Segoe UI", 11),
+            bg="#353b48", fg="white", activebackground="#40739e",
+            activeforeground="white", bd=0, padx=12, pady=8,
+            relief="flat", cursor="hand2", command=command
+        )
+        btn.bind("<Enter>", on_enter)
+        btn.bind("<Leave>", on_leave)
+        return btn
+
+    def show_report():
+        if report_file_name and os.path.exists(report_file_name):
+            os.system(f'open "{report_file_name}"' if os.name == "posix" else f'start {report_file_name}')
+        else:
+            messagebox.showerror("שגיאה", "הדוח לא נמצא")
+
+    def handle_generate(report_type):
+        report_combobox.set(report_type)
+        generate_report()
+
+    # === מידע על הדוחות ===
+    report_options = [
+        ("📦 דוח מלאי", "דוח מלאי", "מציג את כל הפריטים במלאי לפי סניפים, קטגוריה, מיקום ועדכון אחרון."),
+        ("🛒 דוח מכירות (רכישות)", "דוח מכירות (רכישות)", "מציג את הרכישות שבוצעו לפי פריט, לקוח ותאריך."),
+        ("📉 דוח חוסרים במלאי", "דוח חוסרים במלאי", "רשימת פריטים בכמות נמוכה (מתחת ל-100)."),
+        ("📈 דוח שולי רווח", "דוח שולי רווח", "השוואה בין מכירות להוצאות - רווח לפי פריט."),
+        ("🧾 דוח הזמנות", "דוח הזמנות", "מפרט את כל ההזמנות שהוזנו למערכת לפי פריט וסניף."),
+        ("📆 דוח מלאי חודשי", "דוח מלאי חודשי", "ניתוח מלאי לפי חודשים: רכישות מול הזמנות."),
+        ("📦 דוח עודפים במלאי", "דוח עודפים במלאי", "פריטים שהוזמנו בכמויות גדולות אך נמכרו מעט."),
+    ]
+
+    tk.Label(tree_frame, text="📑 מערכת דוחות", font=("Segoe UI", 20, "bold"),
+             fg="#2c3e50", bg="white").pack(pady=(10, 20))
+
+    # === גריד של 2 עמודות ===
+    reports_container = tk.Frame(tree_frame, bg="white")
+    reports_container.pack(padx=20, pady=10, fill="both", expand=True)
+
+    for index, (icon_text, report_name, description) in enumerate(report_options):
+        card = tk.Frame(reports_container, bg="#ecf0f1", bd=1, relief="solid", width=400)
+        card.grid(row=index // 4, column=index % 4, padx=10, pady=10, sticky="nsew")
+        card.grid_propagate(False)
+
+        tk.Label(card, text=icon_text, bg="#ecf0f1", font=("Segoe UI", 13, "bold"),
+                 anchor="e", justify="right").pack(fill="x", padx=15, pady=(10, 0))
+
+        tk.Label(card, text=description, bg="#ecf0f1", font=("Segoe UI", 10),
+                 fg="#2c3e50", anchor="e", justify="right", wraplength=360).pack(fill="x", padx=15, pady=(2, 8))
+
+        btn_generate = create_report_button(card, "📊 צור דוח", lambda r=report_name: handle_generate(r))
+        btn_generate.pack(anchor="e", padx=15, pady=(0, 5))
+
+        stats_label = tk.Label(card, text="", bg="#ecf0f1", font=("Segoe UI", 10), fg="#27ae60", anchor="e", justify="right")
+        stats_label.pack(fill="x", padx=15)
+
+        btn_show = create_report_button(card, "📂 הצג דוח", show_report)
+        btn_show.pack(anchor="e", padx=15, pady=(5, 10))
+        btn_show.config(state="disabled")
+
+        cards_refs[report_name] = {
+            "btn_show": btn_show,
+            "stats": stats_label
+        }
     def generate_report():
         report_type = report_combobox.get()
         if not report_type:
@@ -22,6 +98,7 @@ def open_report_window(tree_frame):
             cursor = connection.cursor()
 
             global report_file_name
+            df = pd.DataFrame()
 
             if report_type == "דוח מלאי":
                 cursor.execute("""
@@ -51,7 +128,6 @@ def open_report_window(tree_frame):
                 ])
                 df['Purchase Date'] = pd.to_datetime(df['Purchase Date'])
                 report_file_name = "דוח_רכישות.xlsx"
-
             elif report_type == "דוח חוסרים במלאי":
                 cursor.execute("""
                     SELECT i.sku, i.item_name, i.quantity, b.branch_name, i.category, i.last_updated
@@ -143,6 +219,9 @@ def open_report_window(tree_frame):
             else:
                 messagebox.showerror("שגיאה", "סוג דוח לא נתמך")
                 return
+            if df.empty:
+                messagebox.showwarning("שגיאה", "לא נמצאו נתונים לדוח")
+                return
 
             with pd.ExcelWriter(report_file_name, engine='xlsxwriter', datetime_format='yyyy-mm-dd') as writer:
                 df.to_excel(writer, index=False, sheet_name='דוח')
@@ -154,65 +233,37 @@ def open_report_window(tree_frame):
                     if report_type == "דוח מלאי":
                         chart.add_series({
                             'name': 'כמות במלאי',
-                            'categories': f'=דוח!B2:B{len(df)+1}',
-                            'values': f'=דוח!D2:D{len(df)+1}',
+                            'categories': f'=דוח!B2:B{len(df) + 1}',
+                            'values': f'=דוח!D2:D{len(df) + 1}',
                         })
                     elif report_type == "דוח מכירות (רכישות)":
                         chart.add_series({
                             'name': 'כמות רכישות',
-                            'categories': f'=דוח!E2:E{len(df)+1}',
-                            'values': f'=דוח!F2:F{len(df)+1}',
+                            'categories': f'=דוח!E2:E{len(df) + 1}',
+                            'values': f'=דוח!F2:F{len(df) + 1}',
                         })
                     elif report_type == "דוח הזמנות":
                         chart.add_series({
                             'name': 'הזמנות לפי מוצר',
-                            'categories': f'=דוח!D2:D{len(df)+1}',
-                            'values': f'=דוח!E2:E{len(df)+1}',
+                            'categories': f'=דוח!D2:D{len(df) + 1}',
+                            'values': f'=דוח!E2:E{len(df) + 1}',
                         })
                     elif report_type == "דוח מלאי חודשי":
                         chart.add_series({
                             'name': 'יתרת מלאי חודשית',
-                            'categories': f'=דוח!A2:A{len(df)+1}',
-                            'values': f'=דוח!E2:E{len(df)+1}',
+                            'categories': f'=דוח!A2:A{len(df) + 1}',
+                            'values': f'=דוח!E2:E{len(df) + 1}',
                         })
                     worksheet.insert_chart('M2', chart)
 
             messagebox.showinfo("הצלחה", f"הדוח נוצר ונשמר כ־{report_file_name}")
-            show_report_Button.config(state=tk.NORMAL)
+
+            if report_type in cards_refs:
+                cards_refs[report_type]["btn_show"].config(state="normal")
+                cards_refs[report_type]["stats"].config(text=f"סה\"כ רשומות: {len(df)}")
 
         except mysql.connector.Error as e:
             messagebox.showerror("שגיאה", f"שגיאה בעת יצירת הדוח: {e}")
         finally:
             if connection:
                 connection.close()
-
-    def show_report():
-        if report_file_name and os.path.exists(report_file_name):
-            os.system(f'open "{report_file_name}"' if os.name == "posix" else f'start {report_file_name}')
-        else:
-            messagebox.showerror("שגיאה", "הדוח לא נמצא")
-
-    # סטיילינג
-    style = ttk.Style()
-    style.configure("TLabel", font=("Segoe UI", 11))
-    style.configure("TButton", font=("Segoe UI", 11), padding=6)
-    style.configure("TCombobox", font=("Segoe UI", 11))
-
-    title_label = ttk.Label(tree_frame, text="מערכת דוחות", font=("Segoe UI", 18, "bold"), foreground="#2c3e50")
-    title_label.pack(pady=(10, 20))
-
-    report_window_frame = ttk.LabelFrame(tree_frame, text="בחירת דוח", padding=15)
-    report_window_frame.pack(padx=15, pady=10, fill="x")
-
-    ttk.Label(report_window_frame, text="בחר סוג דוח:").grid(row=0, column=0, padx=10, pady=5, sticky="e")
-    report_combobox = ttk.Combobox(report_window_frame, values=[
-        "דוח מלאי", "דוח מכירות (רכישות)", "דוח חוסרים במלאי",
-        "דוח הזמנות", "דוח שולי רווח", "דוח מלאי חודשי", "דוח עודפים במלאי"
-    ], state="readonly", width=30)
-    report_combobox.grid(row=0, column=1, padx=10, pady=5, sticky="w")
-
-    create_button = ttk.Button(report_window_frame, text="צור דוח", command=generate_report)
-    create_button.grid(row=1, column=0, columnspan=2, pady=15)
-
-    show_report_Button = ttk.Button(tree_frame, text="הצג דוח", command=show_report, state=tk.DISABLED)
-    show_report_Button.pack(pady=(0, 15))

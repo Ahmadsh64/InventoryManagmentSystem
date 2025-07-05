@@ -13,7 +13,7 @@ from database import connect_to_database
 import mysql.connector
 import tkinter as tk
 import mysql.connector
-
+from ui_utils import create_window_button
 from warhouse import Warehouse_Map
 
 # === הגדרות תצוגה ===
@@ -139,7 +139,7 @@ def draw_grid_view(cnv, zone, page_index, tree_frame, branch_id, select_shelf):
                 cnv.tag_bind(text_id, "<Button-1>", lambda e, r=row, c=col, z=zone: select_shelf(r, c, z))
 
     cnv.create_text(cnv.winfo_reqwidth() // 2, TOP_MARGIN // 2, text=f"Zone: {zone}", font=("Arial", 16, "bold"))
-    create_navigation_buttons(tree_frame, branch_id, select_shelf)
+    create_window_button(tree_frame, branch_id, select_shelf)
 
 # === שאר הפונקציות (מתוקנות גם כן): ===
 def switch_to_grid_view(zone, tree_frame, branch_id, select_shelf):
@@ -167,9 +167,9 @@ def create_navigation_buttons(tree_frame, branch_id, select_shelf):
     button_frame = tk.Frame(tree_frame)
     button_frame.pack(pady=10)
     button_frame._custom_buttons = True
-    tk.Button(button_frame, text="← Prev", command=lambda: grid_prev_zone(tree_frame, branch_id, select_shelf)).pack(side=tk.LEFT, padx=10)
-    tk.Button(button_frame, text="Back to Columns", command=lambda: draw_column_view(canvas, tree_frame, branch_id, select_shelf)).pack(side=tk.LEFT, padx=10)
-    tk.Button(button_frame, text="Next →", command=lambda: grid_next_zone(tree_frame, branch_id, select_shelf)).pack(side=tk.LEFT, padx=10)
+    create_window_button(button_frame, text="← Prev", command=lambda: grid_prev_zone(tree_frame, branch_id, select_shelf)).pack(side=tk.LEFT, padx=10)
+    create_window_button(button_frame, text="Back to Columns", command=lambda: draw_column_view(canvas, tree_frame, branch_id, select_shelf)).pack(side=tk.LEFT, padx=10)
+    create_window_button(button_frame, text="Next →", command=lambda: grid_next_zone(tree_frame, branch_id, select_shelf)).pack(side=tk.LEFT, padx=10)
 
 
 def remove_navigation_buttons(tree_frame):
@@ -239,7 +239,7 @@ def view_inventory(tree_frame):
         search_frame.pack(fill="x", pady=(0, 10))
 
         title_label = tk.Label(
-            search_frame, text="Inventory Search 🔍",
+            search_frame, text="view_inventory🔍",
             font=("Segoe UI", 22, "bold"), bg="#ffffff", fg="#2f3640"
         )
         title_label.grid(row=0, column=0, columnspan=10, pady=20)
@@ -264,6 +264,20 @@ def view_inventory(tree_frame):
 
         search_frame.grid_columnconfigure((1, 3, 5, 7), weight=1)
 
+        def show_warehouse_map():
+            selected_branch = branch_names
+            if not selected_branch or selected_branch == "בחר סניף":
+                messagebox.showwarning("שים לב", "יש לבחור סניף לפני הצגת מפת המחסן")
+                return
+
+            skus_to_highlight = []
+            for child in tree.get_children():
+                values = tree.item(child, 'values')
+                if values:
+                    skus_to_highlight.append(values[0])
+
+            Warehouse_Map(branch_address=selected_branch, highlight_skus=skus_to_highlight)
+
         # === פונקציות סינון ורענון ===
         def filter_inventory_advanced():
             name = entries["Item Name:"].get().strip().lower()
@@ -287,13 +301,9 @@ def view_inventory(tree_frame):
         button_frame = tk.Frame(search_frame, bg="#ffffff")
         button_frame.grid(row=2, column=0, columnspan=10, pady=10)
 
-        def create_button(parent, text, command, bg_color, hover_color):
-            return tk.Button(parent, text=text, command=command,
-                             font=("Segoe UI", 13, "bold"), bg=bg_color, fg="white",
-                             activebackground=hover_color, relief="flat", padx=20, pady=5)
-
-        create_button(button_frame, "Search", filter_inventory_advanced, "#3498db", "#2980b9").pack(side="left", padx=10)
-        create_button(button_frame, "Reset", reset_inventory, "#95a5a6", "#7f8c8d").pack(side="left", padx=10)
+        create_window_button(button_frame, "🔍Search", filter_inventory_advanced).pack(side="left", padx=10)
+        create_window_button(button_frame, "Reset", reset_inventory).pack(side="left", padx=10)
+        create_window_button(button_frame, text="warehouse Map", command=show_warehouse_map).pack(side="left", padx=10)
 
         # === טבלה ===
         table_frame = tk.Frame(main_frame, bg="#f5f6fa")
@@ -325,6 +335,7 @@ def view_inventory(tree_frame):
             tree.insert("", tk.END, values=row)
 
         tree.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+
 
         # === הצגת תמונה ===
         def display_item_image(event):
@@ -562,7 +573,7 @@ def open_add_item_window(tree_frame):
 
     # === שדה תמונה ===
     image_path_var = tk.StringVar()
-    tk.Label(tree_frame, text="Image Path", bg="#f5f6fa", font=("Segoe UI", 14)) \
+    tk.Label(tree_frame, text="Image Path", bg="white", font=("Segoe UI", 14)) \
         .grid(row=len(labels) + 1, column=0, padx=15, pady=8, sticky="w")
     image_entry = ttk.Entry(tree_frame, textvariable=image_path_var, width=30)
     image_entry.grid(row=len(labels) + 1, column=1, padx=15, pady=8, sticky="w")
@@ -857,9 +868,9 @@ def open_update_item_window(tree_frame, sku=""):
     tree_frame.configure(bg="white")
 
     tk.Label(
-        tree_frame, text="🛠️ Update Item", font=("Segoe UI", 24, "bold"),
+        tree_frame, text="🛠️Update Item", font=("Segoe UI", 24, "bold"),
         bg="white", fg="#2f3640"
-    ).grid(row=0, column=0, columnspan=4, pady=(10, 20), sticky="w")
+    ).grid(row=0, column=0, columnspan=4, pady=(5, 20), sticky="w")
 
     entries = {}
     labels = {
@@ -926,8 +937,8 @@ def open_update_item_window(tree_frame, sku=""):
 
     create_button("📷 Select Image", select_image, "#3498db", 11, 2)
     create_button("✔️ Update", lambda: update_item(entries, image_path_var), "#27ae60", 11, 3)
-    create_button("🧹 Clear", lambda: clear_inputs(entries, image_path_var), "#e67e22", 12, 2)
-    create_button("🔄 Load Shelves", refresh_map, "#2980b9", 12, 3)
+    create_button("🧹 Clear", lambda: clear_inputs(entries, image_path_var), "#e67e22", 12, 3)
+    create_button("🔄 Load Shelves", refresh_map, "#2980b9", 12, 2)
 
     # === מפת מחסן ===
     tk.Label(tree_frame, text="📦 Warehouse Map", font=("Segoe UI", 20, "bold"),
@@ -1175,7 +1186,7 @@ def open_search_item_window(tree_frame):
         query = """
             SELECT inventory.sku, inventory.item_name, inventory.category, inventory.quantity, 
                    inventory.price, inventory.color, inventory.size, inventory.shelf_row, inventory.shelf_column, 
-                   branches.branch_id, branches.branch_name, branches.branch_address, inventory.image_path
+                   branches.branch_name, branches.branch_address, inventory.image_path
             FROM inventory
             INNER JOIN branches ON inventory.branch_id = branches.branch_id
             WHERE 1=1
@@ -1291,8 +1302,8 @@ def open_search_item_window(tree_frame):
                 f"צבע: {values[5]}",
                 f"מידה: {values[6]}",
                 f"מיקום: שורה {values[7]}, עמודה {values[8]}",
-                f"סניף: {values[10]}",
-                f"כתובת: {values[11]}"
+                f"סניף: {values[9]}",
+                f"כתובת: {values[10]}"
             ]
 
             for d in details:
@@ -1764,12 +1775,12 @@ def open_finance_window(tree_frame):
 
     # === פונקציית הצגת גרף רווח/הוצאה ===
     def show_chart(income, expense):
-        labels = ['רווחים', 'הוצאות']
+        labels = ["רווחים", "הוצאות"]
         values = [income, expense]
         colors = ['#4CAF50', '#F44336']
         plt.figure(figsize=(5, 4))
         plt.bar(labels, values, color=colors)
-        plt.title('רווח מול הוצאה')
+        plt.title("רווח מול הוצאה")
         plt.ylabel('₪')
         plt.show()
 
@@ -2027,7 +2038,7 @@ def open_finance_window(tree_frame):
             messagebox.showwarning("שגיאה", "אין נתונים לייצוא.")
             return
 
-        df = pd.DataFrame(rows, columns=["סוג", "תאריך", "שם פריט", "סכום", "סניף"])
+        df = pd.DataFrame(rows, columns=["סוג", "תאריך", "שם פריט", "קטגוריה", "סכום", "סניף"])
         file_path = filedialog.asksaveasfilename(defaultextension=".xlsx", filetypes=[("Excel files", "*.xlsx")])
         if file_path:
             df.to_excel(file_path, index=False)
